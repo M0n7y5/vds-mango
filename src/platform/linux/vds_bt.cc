@@ -143,8 +143,8 @@ UniqueFd listen_l2cap_psm(std::uint16_t psm) {
     std::string message = "failed to bind incoming " + psm_error(psm, error);
     if (error == EADDRINUSE) {
       message += "; bluetoothd's input plugin owns the Bluetooth HID channels,"
-                 " run: sudo /usr/share/vds/override-bluetoothd.sh"
-                 " disable-input --restart";
+                 " restart bluetoothd with --noplugin=input"
+                 " (override-bluetoothd.sh disable-input --restart)";
     }
     throw BluetoothLinkError(message);
   }

@@ -2531,7 +2531,6 @@ int run_daemon(const Options &options, vds::Logger &logger) {
         logger.reopen();
         logger.log(vds::LogScope::Daemon, vds::LogLevel::Info,
                    "reopened log file");
-        reload_requested = true;
       } catch (const std::exception &error) {
         logger.log(vds::LogScope::Daemon, vds::LogLevel::Error,
                    std::string("log reopen failed: ") + error.what());

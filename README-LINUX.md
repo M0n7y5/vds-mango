@@ -367,8 +367,8 @@ speaker-test -D hw:<card-number>,<device-number> -c 4 -r 48000 -F S16_LE -t sine
 - `vdsctl` exits 0 on success and 1 on failure; daemon errors go to stderr.
 - `vdsctl trace status` reports the currently enabled trace scopes without
   changing them.
-- `SIGHUP` reopens `/var/log/vdsd.log` for logrotate and reloads
-  `/var/lib/vds/vdsd.db`, so a HUP also picks up database edits.
+- `SIGHUP` reopens `/var/log/vdsd.log` for logrotate; it does not reload
+  `/var/lib/vds/vdsd.db`. Use `vdsctl attach` or `detach` to change it.
 - `vdsctl attach` on an already registered address updates its profile and
   ports instead of failing. A profile change reconnects the controller.
 - `vdsd --help` lists the runtime prerequisites, the signal behavior, and the

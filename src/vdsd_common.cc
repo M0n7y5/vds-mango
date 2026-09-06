@@ -84,7 +84,7 @@ std::string vdsd_usage(std::string_view version, std::string_view build_year,
 #ifndef _WIN32
   text += "requires: root, vds_hcd loaded (sudo modprobe vds_hcd), "
           "bluetoothd --noplugin=input\n"
-          "SIGHUP reopens the log and reloads the controller database\n";
+          "SIGHUP reopens the log file\n";
 #endif
   return text;
 }

@@ -26,7 +26,7 @@ struct VdsctlTraceCommand {
 
 struct VdsctlPlatform {
   std::function<std::string(const std::string &)> request_control;
-  std::function<bool()> is_tty;
+  std::function<bool()> is_tty = [] { return false; };
 };
 
 std::string vdsctl_usage(std::string_view version, std::string_view build_year);
