@@ -6,9 +6,11 @@
 #endif
 
 #include <array>
+#include <cstdio>
 #include <stdexcept>
 #include <string>
 
+#include <io.h>
 #include <windows.h>
 
 #include "vds_build_info.hh"
@@ -43,6 +45,10 @@ int main(int argc, char **argv) {
                                  .request_control =
                                      [](const std::string &command) {
                                        return request_daemon(command);
+                                     },
+                                 .is_tty =
+                                     [] {
+                                       return _isatty(_fileno(stdout)) != 0;
                                      },
                              });
 }

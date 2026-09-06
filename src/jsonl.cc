@@ -203,6 +203,26 @@ JsonlValue parse_jsonl_value(std::string_view text, std::size_t &offset,
         .is_array = true,
     };
   }
+  if (text.compare(offset, 4, "true") == 0) {
+    offset += 4;
+    return JsonlValue{
+        .string_value = {},
+        .array_value = {},
+        .is_array = false,
+        .bool_value = true,
+        .is_bool = true,
+    };
+  }
+  if (text.compare(offset, 5, "false") == 0) {
+    offset += 5;
+    return JsonlValue{
+        .string_value = {},
+        .array_value = {},
+        .is_array = false,
+        .bool_value = false,
+        .is_bool = true,
+    };
+  }
   throw std::runtime_error("unsupported JSON value" + context_suffix(context));
 }
 
@@ -369,6 +389,20 @@ const JsonlValue *find_jsonl_field(std::span<const JsonlField> fields,
 
 } // namespace
 
+bool require_jsonl_bool(std::span<const JsonlField> fields,
+                        std::string_view key, std::string_view context) {
+  const JsonlValue *value = find_jsonl_field(fields, key, context);
+  if (value == nullptr) {
+    throw std::runtime_error("missing JSON field" + context_suffix(context) +
+                             ": " + std::string(key));
+  }
+  if (!value->is_bool) {
+    throw std::runtime_error("JSON field must be a boolean" +
+                             context_suffix(context) + ": " + std::string(key));
+  }
+  return value->bool_value;
+}
+
 std::string require_jsonl_string(std::span<const JsonlField> fields,
                                  std::string_view key,
                                  std::string_view context) {
@@ -377,7 +411,7 @@ std::string require_jsonl_string(std::span<const JsonlField> fields,
     throw std::runtime_error("missing JSON field" + context_suffix(context) +
                              ": " + std::string(key));
   }
-  if (value->is_array) {
+  if (value->is_array || value->is_bool) {
     throw std::runtime_error("JSON field must be a string" +
                              context_suffix(context) + ": " + std::string(key));
   }

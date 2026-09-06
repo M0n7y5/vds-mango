@@ -13,6 +13,8 @@ struct JsonlValue {
   std::string string_value;
   std::vector<unsigned> array_value;
   bool is_array = false;
+  bool bool_value = false;
+  bool is_bool = false;
 };
 
 struct JsonlField {
@@ -27,6 +29,8 @@ std::string jsonl_string_field(std::string_view key, std::string_view value);
 std::string jsonl_string_value(std::string_view value);
 std::string jsonl_unsigned_array_field(std::string_view key,
                                        std::span<const unsigned> values);
+bool require_jsonl_bool(std::span<const JsonlField> fields,
+                        std::string_view key, std::string_view context);
 std::string require_jsonl_string(std::span<const JsonlField> fields,
                                  std::string_view key,
                                  std::string_view context);
