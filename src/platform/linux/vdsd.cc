@@ -22,6 +22,7 @@
 #include <vector>
 
 #include <fcntl.h>
+#include <grp.h>
 #include <poll.h>
 #include <signal.h>
 #include <sys/epoll.h>
@@ -456,7 +457,7 @@ std::uint32_t resolve_config_profile(const vds::ControllerConfig &controller) {
   throw std::runtime_error("unknown controller profile");
 }
 
-int open_control_socket(const std::string &path) {
+int open_control_socket(const std::string &path, vds::Logger &logger) {
   vds::UniqueFd fd(
       ::socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0));
   if (!fd) {
@@ -479,6 +480,13 @@ int open_control_socket(const std::string &path) {
                              std::strerror(error));
   }
   (void)::chmod(path.c_str(), 0660);
+  if (const struct group *vds_group = ::getgrnam("vds")) {
+    if (::chown(path.c_str(), 0, vds_group->gr_gid) < 0) {
+      logger.log(vds::LogScope::Control, vds::LogLevel::Warn,
+                 "control socket group vds not applied: " +
+                     std::string(std::strerror(errno)));
+    }
+  }
 
   if (::listen(fd.get(), 4) < 0) {
     const int error = errno;
@@ -1437,7 +1445,9 @@ void initialize_bt_controller(vds::BtL2capBackend &bt_backend,
       if (ready <= 0) {
         throw std::runtime_error("timed out waiting for initial Bluetooth "
                                  "feature report " +
-                                 hex_u8(report_id));
+                                 hex_u8(report_id) +
+                                 "; the controller dropped during setup, "
+                                 "press the PS button to retry");
       }
       if ((pfd.revents & (POLLERR | POLLHUP | POLLNVAL)) != 0) {
         throw std::runtime_error("Bluetooth control channel closed during "
@@ -2332,6 +2342,7 @@ void handle_control_client(int control_fd, std::span<VirtualPort> ports,
         .address = controller.config.address,
         .connected = controller.virtual_connected,
         .path = controller.virtual_connected ? controller.device : "",
+        .error = controller.virtual_connected ? "" : controller.last_error,
     });
   }
 
@@ -2483,6 +2494,265 @@ vds::UniqueFd acquire_single_instance_lock(const char *path) {
   return fd;
 }
 
+int run_daemon(const Options &options, vds::Logger &logger) {
+  logger.log(vds::LogScope::Daemon, vds::LogLevel::Info,
+             "started socket=" + options.socket + " log=" + options.log_path +
+                 " db=" + options.db_path);
+  if (vds::discover_vds_devices().empty()) {
+    logger.log(vds::LogScope::Port, vds::LogLevel::Error,
+               std::string(kVirtualPortProviderUnavailableReason) +
+                   " detail=" + kLinuxVirtualPortProviderUnavailable);
+    throw std::runtime_error(kLinuxVirtualPortProviderUnavailable);
+  }
+
+  const vds::UniqueFd signal_fd = create_signal_fd();
+
+  vds::UniqueFd control_fd(open_control_socket(options.socket, logger));
+  vds::BtL2capAcceptor bt_acceptor;
+  vds::VdsDeviceMonitor vds_monitor;
+  logger.log(vds::LogScope::Bluetooth, vds::LogLevel::Info,
+             "listening for controller-initiated raw HID channels");
+  SocketPathGuard control_socket_path(options.socket);
+  std::vector<VirtualPort> ports;
+  std::vector<ControllerRuntime> controllers;
+  vds::UniqueFd epoll_fd;
+  std::uint32_t trace_flags = 0;
+  bool reload_requested = true;
+  bool epoll_dirty = true;
+  bool first_reload = true;
+  unsigned bt_accept_failures = 0;
+  unsigned control_accept_failures = 0;
+  SignalRequests signals;
+
+  while (!signals.stop) {
+    if (signals.log_reopen) {
+      signals.log_reopen = false;
+      try {
+        logger.reopen();
+        logger.log(vds::LogScope::Daemon, vds::LogLevel::Info,
+                   "reopened log file");
+      } catch (const std::exception &error) {
+        logger.log(vds::LogScope::Daemon, vds::LogLevel::Error,
+                   std::string("log reopen failed: ") + error.what());
+      }
+    }
+
+    if (reload_requested) {
+      try {
+        reconcile_controller_configs(ports, controllers, options.db_path,
+                                     logger);
+        epoll_dirty = true;
+      } catch (const std::exception &error) {
+        /* Starting with no usable state is a setup failure, not a reload. */
+        if (first_reload) {
+          throw std::runtime_error(
+              "failed to load " + options.db_path + ": " + error.what() +
+              "; if this database predates 0.3.0, delete it and re-register "
+              "controllers with vdsctl attach");
+        }
+        logger.log(vds::LogScope::Config, vds::LogLevel::Error,
+                   std::string("reload failed: ") + error.what());
+      }
+      reload_requested = false;
+      first_reload = false;
+    }
+
+    if (epoll_dirty || !epoll_fd) {
+      epoll_fd = rebuild_epoll(control_fd.get(), signal_fd.get(), bt_acceptor,
+                               vds_monitor, ports, controllers);
+      epoll_dirty = false;
+    }
+
+    std::array<epoll_event, 64> events{};
+    const int timeout_ms = next_wakeup_timeout_ms(ports, controllers);
+    const int ready =
+        ::epoll_wait(epoll_fd.get(), events.data(),
+                     static_cast<int>(events.size()), timeout_ms);
+    if (ready < 0) {
+      if (errno == EINTR) {
+        continue;
+      }
+      throw std::runtime_error("epoll_wait failed: " +
+                               std::string(std::strerror(errno)));
+    }
+    if (ready == 0) {
+      flush_pending_outputs(ports, controllers, trace_flags, logger,
+                            epoll_dirty);
+      continue;
+    }
+
+    for (int i = 0; i < ready; ++i) {
+      const EventSource source = decode_event(events[i].data.u64);
+      const std::uint32_t revents = events[i].events;
+
+      if (source.type == EventType::Signal) {
+        if ((revents & EPOLLIN) != 0) {
+          drain_signal_fd(signal_fd.get(), signals);
+        }
+        continue;
+      }
+
+      if (source.type == EventType::Control) {
+        if ((revents & EPOLLIN) != 0) {
+          handle_control_client(control_fd.get(), ports, controllers,
+                                options.db_path, trace_flags,
+                                reload_requested, logger,
+                                control_accept_failures);
+        }
+        if ((revents & (EPOLLERR | EPOLLHUP)) != 0) {
+          throw std::runtime_error("control socket epoll error");
+        }
+        continue;
+      }
+
+      if (source.type == EventType::BtAcceptControl ||
+          source.type == EventType::BtAcceptInterrupt) {
+        if ((revents & EPOLLIN) != 0) {
+          handle_bt_accept(ports, controllers, bt_acceptor,
+                           source.type == EventType::BtAcceptControl, logger,
+                           epoll_dirty, bt_accept_failures);
+        }
+        if ((revents & (EPOLLERR | EPOLLHUP)) != 0) {
+          throw std::runtime_error("Bluetooth listener epoll error");
+        }
+        continue;
+      }
+
+      if (source.type == EventType::Udev) {
+        if ((revents & EPOLLIN) != 0 && vds_monitor.drain()) {
+          logger.log(vds::LogScope::Port, vds::LogLevel::Info,
+                     "virtual endpoint udev event; reloading");
+          reload_requested = true;
+          epoll_dirty = true;
+        }
+        if ((revents & (EPOLLERR | EPOLLHUP)) != 0) {
+          throw std::runtime_error("udev monitor epoll error");
+        }
+        continue;
+      }
+
+      if (source.type == EventType::Port) {
+        if (source.index >= ports.size()) {
+          continue;
+        }
+        auto &port = ports[source.index];
+        ControllerRuntime *controller =
+            controller_for_port(controllers, port.path);
+        vds::BtL2capBackend *backend = controller && controller->backend
+                                           ? &*controller->backend
+                                           : nullptr;
+        if ((revents & EPOLLIN) != 0) {
+          for (int frame = 0; frame < kMaxPortFramesPerWake; ++frame) {
+            try {
+              if (!handle_vds_frame(port, backend, trace_flags, logger)) {
+                break;
+              }
+            } catch (const vds::BluetoothLinkError &error) {
+              if (!controller) {
+                throw;
+              }
+              drop_bt_backend(*controller, port, error.what(), logger);
+              epoll_dirty = true;
+              break;
+            } catch (const PortIoError &error) {
+              logger.log(vds::LogScope::Port, vds::LogLevel::Error,
+                         std::string(error.what()) + "; reloading ports");
+              reload_requested = true;
+              epoll_dirty = true;
+              break;
+            }
+          }
+        }
+        if ((revents & (EPOLLERR | EPOLLHUP)) != 0) {
+          logger.log(vds::LogScope::Port, vds::LogLevel::Error,
+                     port.path + " epoll error; reloading ports");
+          reload_requested = true;
+          epoll_dirty = true;
+        }
+        continue;
+      }
+
+      if (source.index >= controllers.size() ||
+          !controllers[source.index].backend) {
+        continue;
+      }
+      auto &controller = controllers[source.index];
+      const auto port_index = find_port_index(ports, controller.device);
+      if (!port_index) {
+        controller.backend.reset();
+        controller.virtual_connected = false;
+        epoll_dirty = true;
+        continue;
+      }
+      auto &port = ports[*port_index];
+
+      if (source.type == EventType::BtControl) {
+        if ((revents & EPOLLIN) != 0) {
+          for (int packet = 0; packet < kMaxBtPacketsPerWake; ++packet) {
+            try {
+              if (!handle_bt_control(port, *controller.backend, trace_flags,
+                                     logger)) {
+                break;
+              }
+            } catch (const vds::BluetoothLinkError &error) {
+              drop_bt_backend(controller, port, error.what(), logger);
+              epoll_dirty = true;
+              break;
+            } catch (const PortIoError &error) {
+              logger.log(vds::LogScope::Port, vds::LogLevel::Error,
+                         std::string(error.what()) + "; reloading ports");
+              reload_requested = true;
+              epoll_dirty = true;
+              break;
+            }
+          }
+        }
+        if ((revents & (EPOLLERR | EPOLLHUP)) != 0) {
+          drop_bt_backend(controller, port,
+                          "Bluetooth L2CAP control epoll error", logger);
+          epoll_dirty = true;
+        }
+        continue;
+      }
+
+      if (source.type == EventType::BtInterrupt) {
+        if ((revents & EPOLLIN) != 0) {
+          for (int packet = 0; packet < kMaxBtPacketsPerWake; ++packet) {
+            try {
+              if (!handle_bt_input(port, *controller.backend, trace_flags,
+                                   logger)) {
+                break;
+              }
+            } catch (const vds::BluetoothLinkError &error) {
+              drop_bt_backend(controller, port, error.what(), logger);
+              epoll_dirty = true;
+              break;
+            } catch (const PortIoError &error) {
+              logger.log(vds::LogScope::Port, vds::LogLevel::Error,
+                         std::string(error.what()) + "; reloading ports");
+              reload_requested = true;
+              epoll_dirty = true;
+              break;
+            }
+          }
+        }
+        if ((revents & (EPOLLERR | EPOLLHUP)) != 0) {
+          drop_bt_backend(controller, port,
+                          "Bluetooth L2CAP interrupt epoll error", logger);
+          epoll_dirty = true;
+        }
+      }
+    }
+
+    flush_pending_outputs(ports, controllers, trace_flags, logger,
+                          epoll_dirty);
+  }
+
+  logger.log(vds::LogScope::Daemon, vds::LogLevel::Info, "stopping");
+  disconnect_all(ports, controllers, logger);
+  return 0;
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -2490,262 +2760,17 @@ int main(int argc, char **argv) {
     ::signal(SIGPIPE, SIG_IGN);
 
     const Options options = parse_platform_args(argc, argv);
-    vds::Logger logger(options.log_path);
-    logger.log(vds::LogScope::Daemon, vds::LogLevel::Info,
-               "started socket=" + options.socket + " log=" + options.log_path +
-                   " db=" + options.db_path);
-    if (vds::discover_vds_devices().empty()) {
-      logger.log(vds::LogScope::Port, vds::LogLevel::Error,
-                 std::string(kVirtualPortProviderUnavailableReason) +
-                     " detail=" + kLinuxVirtualPortProviderUnavailable);
-      throw std::runtime_error(kLinuxVirtualPortProviderUnavailable);
-    }
-
-    const vds::UniqueFd signal_fd = create_signal_fd();
     const vds::UniqueFd instance_lock =
         acquire_single_instance_lock(kInstanceLockPath);
-
-    vds::UniqueFd control_fd(open_control_socket(options.socket));
-    vds::BtL2capAcceptor bt_acceptor;
-    vds::VdsDeviceMonitor vds_monitor;
-    logger.log(vds::LogScope::Bluetooth, vds::LogLevel::Info,
-               "listening for controller-initiated raw HID channels");
-    SocketPathGuard control_socket_path(options.socket);
-    std::vector<VirtualPort> ports;
-    std::vector<ControllerRuntime> controllers;
-    vds::UniqueFd epoll_fd;
-    std::uint32_t trace_flags = 0;
-    bool reload_requested = true;
-    bool epoll_dirty = true;
-    bool first_reload = true;
-    unsigned bt_accept_failures = 0;
-    unsigned control_accept_failures = 0;
-    SignalRequests signals;
-
-    while (!signals.stop) {
-      if (signals.log_reopen) {
-        signals.log_reopen = false;
-        try {
-          logger.reopen();
-          logger.log(vds::LogScope::Daemon, vds::LogLevel::Info,
-                     "reopened log file");
-        } catch (const std::exception &error) {
-          logger.log(vds::LogScope::Daemon, vds::LogLevel::Error,
-                     std::string("log reopen failed: ") + error.what());
-        }
-      }
-
-      if (reload_requested) {
-        try {
-          reconcile_controller_configs(ports, controllers, options.db_path,
-                                       logger);
-          epoll_dirty = true;
-        } catch (const std::exception &error) {
-          /* Starting with no usable state is a setup failure, not a reload. */
-          if (first_reload) {
-            throw;
-          }
-          logger.log(vds::LogScope::Config, vds::LogLevel::Error,
-                     std::string("reload failed: ") + error.what());
-        }
-        reload_requested = false;
-        first_reload = false;
-      }
-
-      if (epoll_dirty || !epoll_fd) {
-        epoll_fd = rebuild_epoll(control_fd.get(), signal_fd.get(), bt_acceptor,
-                                 vds_monitor, ports, controllers);
-        epoll_dirty = false;
-      }
-
-      std::array<epoll_event, 64> events{};
-      const int timeout_ms = next_wakeup_timeout_ms(ports, controllers);
-      const int ready =
-          ::epoll_wait(epoll_fd.get(), events.data(),
-                       static_cast<int>(events.size()), timeout_ms);
-      if (ready < 0) {
-        if (errno == EINTR) {
-          continue;
-        }
-        throw std::runtime_error("epoll_wait failed: " +
-                                 std::string(std::strerror(errno)));
-      }
-      if (ready == 0) {
-        flush_pending_outputs(ports, controllers, trace_flags, logger,
-                              epoll_dirty);
-        continue;
-      }
-
-      for (int i = 0; i < ready; ++i) {
-        const EventSource source = decode_event(events[i].data.u64);
-        const std::uint32_t revents = events[i].events;
-
-        if (source.type == EventType::Signal) {
-          if ((revents & EPOLLIN) != 0) {
-            drain_signal_fd(signal_fd.get(), signals);
-          }
-          continue;
-        }
-
-        if (source.type == EventType::Control) {
-          if ((revents & EPOLLIN) != 0) {
-            handle_control_client(control_fd.get(), ports, controllers,
-                                  options.db_path, trace_flags,
-                                  reload_requested, logger,
-                                  control_accept_failures);
-          }
-          if ((revents & (EPOLLERR | EPOLLHUP)) != 0) {
-            throw std::runtime_error("control socket epoll error");
-          }
-          continue;
-        }
-
-        if (source.type == EventType::BtAcceptControl ||
-            source.type == EventType::BtAcceptInterrupt) {
-          if ((revents & EPOLLIN) != 0) {
-            handle_bt_accept(ports, controllers, bt_acceptor,
-                             source.type == EventType::BtAcceptControl, logger,
-                             epoll_dirty, bt_accept_failures);
-          }
-          if ((revents & (EPOLLERR | EPOLLHUP)) != 0) {
-            throw std::runtime_error("Bluetooth listener epoll error");
-          }
-          continue;
-        }
-
-        if (source.type == EventType::Udev) {
-          if ((revents & EPOLLIN) != 0 && vds_monitor.drain()) {
-            logger.log(vds::LogScope::Port, vds::LogLevel::Info,
-                       "virtual endpoint udev event; reloading");
-            reload_requested = true;
-            epoll_dirty = true;
-          }
-          if ((revents & (EPOLLERR | EPOLLHUP)) != 0) {
-            throw std::runtime_error("udev monitor epoll error");
-          }
-          continue;
-        }
-
-        if (source.type == EventType::Port) {
-          if (source.index >= ports.size()) {
-            continue;
-          }
-          auto &port = ports[source.index];
-          ControllerRuntime *controller =
-              controller_for_port(controllers, port.path);
-          vds::BtL2capBackend *backend = controller && controller->backend
-                                             ? &*controller->backend
-                                             : nullptr;
-          if ((revents & EPOLLIN) != 0) {
-            for (int frame = 0; frame < kMaxPortFramesPerWake; ++frame) {
-              try {
-                if (!handle_vds_frame(port, backend, trace_flags, logger)) {
-                  break;
-                }
-              } catch (const vds::BluetoothLinkError &error) {
-                if (!controller) {
-                  throw;
-                }
-                drop_bt_backend(*controller, port, error.what(), logger);
-                epoll_dirty = true;
-                break;
-              } catch (const PortIoError &error) {
-                logger.log(vds::LogScope::Port, vds::LogLevel::Error,
-                           std::string(error.what()) + "; reloading ports");
-                reload_requested = true;
-                epoll_dirty = true;
-                break;
-              }
-            }
-          }
-          if ((revents & (EPOLLERR | EPOLLHUP)) != 0) {
-            logger.log(vds::LogScope::Port, vds::LogLevel::Error,
-                       port.path + " epoll error; reloading ports");
-            reload_requested = true;
-            epoll_dirty = true;
-          }
-          continue;
-        }
-
-        if (source.index >= controllers.size() ||
-            !controllers[source.index].backend) {
-          continue;
-        }
-        auto &controller = controllers[source.index];
-        const auto port_index = find_port_index(ports, controller.device);
-        if (!port_index) {
-          controller.backend.reset();
-          controller.virtual_connected = false;
-          epoll_dirty = true;
-          continue;
-        }
-        auto &port = ports[*port_index];
-
-        if (source.type == EventType::BtControl) {
-          if ((revents & EPOLLIN) != 0) {
-            for (int packet = 0; packet < kMaxBtPacketsPerWake; ++packet) {
-              try {
-                if (!handle_bt_control(port, *controller.backend, trace_flags,
-                                       logger)) {
-                  break;
-                }
-              } catch (const vds::BluetoothLinkError &error) {
-                drop_bt_backend(controller, port, error.what(), logger);
-                epoll_dirty = true;
-                break;
-              } catch (const PortIoError &error) {
-                logger.log(vds::LogScope::Port, vds::LogLevel::Error,
-                           std::string(error.what()) + "; reloading ports");
-                reload_requested = true;
-                epoll_dirty = true;
-                break;
-              }
-            }
-          }
-          if ((revents & (EPOLLERR | EPOLLHUP)) != 0) {
-            drop_bt_backend(controller, port,
-                            "Bluetooth L2CAP control epoll error", logger);
-            epoll_dirty = true;
-          }
-          continue;
-        }
-
-        if (source.type == EventType::BtInterrupt) {
-          if ((revents & EPOLLIN) != 0) {
-            for (int packet = 0; packet < kMaxBtPacketsPerWake; ++packet) {
-              try {
-                if (!handle_bt_input(port, *controller.backend, trace_flags,
-                                     logger)) {
-                  break;
-                }
-              } catch (const vds::BluetoothLinkError &error) {
-                drop_bt_backend(controller, port, error.what(), logger);
-                epoll_dirty = true;
-                break;
-              } catch (const PortIoError &error) {
-                logger.log(vds::LogScope::Port, vds::LogLevel::Error,
-                           std::string(error.what()) + "; reloading ports");
-                reload_requested = true;
-                epoll_dirty = true;
-                break;
-              }
-            }
-          }
-          if ((revents & (EPOLLERR | EPOLLHUP)) != 0) {
-            drop_bt_backend(controller, port,
-                            "Bluetooth L2CAP interrupt epoll error", logger);
-            epoll_dirty = true;
-          }
-        }
-      }
-
-      flush_pending_outputs(ports, controllers, trace_flags, logger,
-                            epoll_dirty);
+    vds::Logger logger(options.log_path);
+    try {
+      return run_daemon(options, logger);
+    } catch (const std::exception &error) {
+      logger.log(vds::LogScope::Daemon, vds::LogLevel::Error,
+                 std::string("fatal: ") + error.what());
+      std::cerr << "vdsd: " << error.what() << "\n";
+      return 1;
     }
-
-    logger.log(vds::LogScope::Daemon, vds::LogLevel::Info, "stopping");
-    disconnect_all(ports, controllers, logger);
-    return 0;
   } catch (const std::exception &error) {
     std::cerr << "vdsd: " << error.what() << "\n";
     return 1;

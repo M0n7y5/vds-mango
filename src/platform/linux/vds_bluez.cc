@@ -188,6 +188,7 @@ read_controller_target(DBusMessageIter *properties) {
   std::optional<std::string> modalias;
   bool paired = false;
   bool connected = false;
+  bool trusted = false;
 
   while (::dbus_message_iter_get_arg_type(properties) != DBUS_TYPE_INVALID) {
     require_message_type(properties, DBUS_TYPE_DICT_ENTRY,
@@ -219,6 +220,8 @@ read_controller_target(DBusMessageIter *properties) {
       paired = read_dbus_variant_bool(&property).value_or(false);
     } else if (std::strcmp(property_name, "Connected") == 0) {
       connected = read_dbus_variant_bool(&property).value_or(false);
+    } else if (std::strcmp(property_name, "Trusted") == 0) {
+      trusted = read_dbus_variant_bool(&property).value_or(false);
     }
 
     ::dbus_message_iter_next(properties);
@@ -242,6 +245,7 @@ read_controller_target(DBusMessageIter *properties) {
       .name = std::move(display_name),
       .profile = *profile,
       .online = connected,
+      .trusted = trusted,
   };
 }
 

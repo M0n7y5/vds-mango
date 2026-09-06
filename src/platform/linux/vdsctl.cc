@@ -60,11 +60,23 @@ std::string request_daemon(const std::string &socket_path,
 
   if (::connect(fd.get(), reinterpret_cast<const sockaddr *>(&address),
                 sizeof(address)) < 0) {
+    const int connect_error = errno;
     if (is_socket_timeout()) {
       throw std::runtime_error("daemon is unresponsive: " + socket_path);
     }
+    if (connect_error == ENOENT || connect_error == ECONNREFUSED) {
+      throw std::runtime_error("vdsd is not running (no listener at " +
+                               socket_path +
+                               "); start it with: sudo systemctl start vdsd");
+    }
+    if (connect_error == EACCES) {
+      throw std::runtime_error(
+          "permission denied on " + socket_path +
+          "; run vdsctl as root or add your user to the vds group (log out "
+          "and back in)");
+    }
     throw std::runtime_error("failed to connect " + socket_path + ": " +
-                             std::strerror(errno));
+                             std::strerror(connect_error));
   }
 
   try {
@@ -108,6 +120,10 @@ int main(int argc, char **argv) {
                                      [](const std::string &command) {
                                        return request_daemon(
                                            kDefaultControlSocket, command);
+                                     },
+                                 .is_tty =
+                                     [] {
+                                       return ::isatty(STDOUT_FILENO) != 0;
                                      },
                              });
 }

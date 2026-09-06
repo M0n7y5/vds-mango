@@ -135,28 +135,44 @@ vds::ConfigDb parse_config_db(std::string_view text) {
 }
 
 std::string normalize_bluetooth_address(std::string_view address) {
-  if (address.size() != 17) {
-    throw std::runtime_error("invalid Bluetooth address: " +
-                             std::string(address));
+  const auto invalid = [&] {
+    return std::runtime_error("invalid Bluetooth address: " +
+                              std::string(address));
+  };
+
+  std::string digits;
+  digits.reserve(12);
+  if (address.size() == 17) {
+    for (std::size_t i = 0; i < address.size(); ++i) {
+      if (i % 3 == 2) {
+        if (address[i] != ':' && address[i] != '-') {
+          throw invalid();
+        }
+        continue;
+      }
+      if (!is_hex_digit(address[i])) {
+        throw invalid();
+      }
+      digits.push_back(lowercase_hex(address[i]));
+    }
+  } else if (address.size() == 12) {
+    for (const char ch : address) {
+      if (!is_hex_digit(ch)) {
+        throw invalid();
+      }
+      digits.push_back(lowercase_hex(ch));
+    }
+  } else {
+    throw invalid();
   }
 
   std::string normalized;
-  normalized.reserve(address.size());
-  for (std::size_t i = 0; i < address.size(); ++i) {
-    const bool separator = i == 2 || i == 5 || i == 8 || i == 11 || i == 14;
-    if (separator) {
-      if (address[i] != ':') {
-        throw std::runtime_error("invalid Bluetooth address: " +
-                                 std::string(address));
-      }
+  normalized.reserve(17);
+  for (std::size_t i = 0; i < digits.size(); ++i) {
+    if (i > 0 && i % 2 == 0) {
       normalized.push_back(':');
-      continue;
     }
-    if (!is_hex_digit(address[i])) {
-      throw std::runtime_error("invalid Bluetooth address: " +
-                               std::string(address));
-    }
-    normalized.push_back(lowercase_hex(address[i]));
+    normalized.push_back(digits[i]);
   }
   return normalized;
 }

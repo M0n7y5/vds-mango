@@ -130,6 +130,12 @@ if(BUILD_TESTS AND NOT WIN32)
   add_test(NAME config COMMAND test_config
            WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 
+  add_executable(test_vdsctl tests/test_vdsctl.cc)
+  target_link_libraries(test_vdsctl PRIVATE vds_test_support vdsctl_common
+                                            vds_config jsonl vds_common)
+  add_test(NAME vdsctl COMMAND test_vdsctl
+           WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+
   add_executable(test_protocol_feature_set tests/test_protocol.cc)
   target_compile_definitions(test_protocol_feature_set PRIVATE VDS_TEST_L11C)
   target_link_libraries(test_protocol_feature_set PRIVATE vds_test_support
@@ -375,7 +381,7 @@ else()
     install(CODE "${VDS_INSTALL_SERVICE_CODE}")
     add_custom_target(
       uninstall
-      COMMAND ${VDS_UNINSTALL_SERVICE_SCRIPT} --disable --remove-file
+      COMMAND ${VDS_UNINSTALL_SERVICE_SCRIPT} --stop --disable --remove-file
               ${VDS_INSTALLED_SYSTEMD_SERVICE}
       COMMAND ${CMAKE_COMMAND} -E rm -f ${VDS_INSTALLED_VDSD}
               ${VDS_INSTALLED_VDSCTL})

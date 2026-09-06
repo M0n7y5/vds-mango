@@ -348,6 +348,33 @@ restart_bluetooth() {
 	systemctl restart "${service}"
 }
 
+execstart_value() {
+	local service=$1
+	local value=""
+
+	if command -v systemctl >/dev/null 2>&1; then
+		value=$(systemctl show "${service}" -p ExecStart --value \
+			2>/dev/null || true)
+	fi
+	if [[ -z "${value}" ]]; then
+		value=$(service_execstart_command "${service}")
+	fi
+	printf '%s\n' "${value}"
+}
+
+print_execstart() {
+	local service=$1
+
+	printf '%s ExecStart: %s\n' "${service}" "$(execstart_value "${service}")"
+}
+
+print_disable_input_warning() {
+	local message="warning: Bluetooth keyboards and mice stop working"
+
+	message+=" while the input plugin is disabled"
+	printf '%s\n' "${message}" >&2
+}
+
 main() {
 	local action=""
 	local restart="no"
@@ -401,6 +428,11 @@ main() {
 	daemon_reload
 	if [[ "${restart}" == "yes" ]]; then
 		restart_bluetooth "${service}"
+	fi
+
+	print_execstart "${service}"
+	if [[ "${action}" == "disable-input" ]]; then
+		print_disable_input_warning
 	fi
 }
 
