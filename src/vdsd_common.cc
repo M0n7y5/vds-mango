@@ -81,6 +81,11 @@ std::string vdsd_usage(std::string_view version, std::string_view build_year,
     text += platform_options;
   }
   text += "\n";
+#ifndef _WIN32
+  text += "requires: root, vds_hcd loaded (sudo modprobe vds_hcd), "
+          "bluetoothd --noplugin=input\n"
+          "SIGHUP reopens the log and reloads the controller database\n";
+#endif
   return text;
 }
 
@@ -397,6 +402,8 @@ std::string format_control_list_reply(
     reply +=
         jsonl_string_field("path", connected && status ? status->path : "");
     reply += ',';
+    reply += jsonl_string_field("error", status ? status->error : "");
+    reply += ',';
     reply += jsonl_string_field("profile",
                                 controller_profile_name(controller.profile));
     reply += ',';
@@ -424,6 +431,8 @@ std::string format_control_target_jsonl(const ControllerTarget &target,
   line += jsonl_string_field("name", target.name);
   line += ',';
   line += jsonl_bool_field("online", target.online);
+  line += ',';
+  line += jsonl_bool_field("trusted", target.trusted);
   line += ',';
   line += jsonl_bool_field("registered", registered);
   line += "}\n";
@@ -468,7 +477,8 @@ std::string format_control_error_reply(std::string_view error) {
 }
 
 std::string format_control_attach_reply(bool ok, std::string_view error,
-                                        const ControllerConfig &config) {
+                                        const ControllerConfig &config,
+                                        bool online, bool trusted) {
   std::string reply = "{";
   reply += jsonl_bool_field("OK", ok);
   reply += ',';
@@ -480,6 +490,10 @@ std::string format_control_attach_reply(bool ok, std::string_view error,
   reply += ',';
   reply +=
       jsonl_string_field("profile", controller_profile_name(config.profile));
+  reply += ',';
+  reply += jsonl_bool_field("online", online);
+  reply += ',';
+  reply += jsonl_bool_field("trusted", trusted);
   reply += "}\n";
   return reply;
 }
@@ -539,14 +553,12 @@ std::string handle_attach_control_request(
       .profile = ControllerProfile::Unspecified,
       .ports = {},
   };
+  bool online = false;
+  bool trusted = false;
+  bool updated = false;
   try {
     const std::string address = normalize_bluetooth_address(
         require_jsonl_string(fields, "address", context));
-    const ConfigDb current_db = load_config_db(db_path);
-    if (const ControllerConfig *registered =
-            find_controller_config_by_address(current_db, address)) {
-      config = *registered;
-    }
 
     static constexpr std::string_view expected[] = {
         "command",
@@ -556,55 +568,44 @@ std::string handle_attach_control_request(
     };
     reject_unknown_jsonl_fields(fields, expected, context);
 
-    if (!config.address.empty()) {
-      const std::string error = "address is already registered";
-      logger.log(vds::LogScope::Control, LogLevel::Warn,
-                 "attach rejected " + error + ": " + config.address);
-      return format_control_attach_reply(false, error, config);
-    }
-
     config.address = address;
     config.profile = parse_controller_profile(
         require_jsonl_string(fields, "profile", context));
     config.ports = require_jsonl_unsigned_array(fields, "ports", context);
 
     const std::vector<ControllerTarget> targets = list_targets();
-    if (find_controller_target_by_address(targets, config.address) == nullptr) {
+    const ControllerTarget *target =
+        find_controller_target_by_address(targets, config.address);
+    if (target == nullptr) {
       const std::string error =
           "address is not paired, not supported, or not attachable; run "
           "vdsctl list-targets";
       logger.log(vds::LogScope::Control, LogLevel::Warn,
                  "attach rejected " + error);
       config = {};
-      return format_control_attach_reply(false, error, config);
+      return format_control_attach_reply(false, error, config, false, false);
     }
+    online = target->online;
+    trusted = target->trusted;
 
     const std::vector<std::string> devices = port_status_paths(ports);
-    bool already_registered = false;
     update_config_db(db_path, [&](ConfigDb &db) {
-      if (const ControllerConfig *registered =
-              find_controller_config_by_address(db, config.address)) {
-        config = *registered;
-        already_registered = true;
-        return;
-      }
+      updated =
+          find_controller_config_by_address(db, config.address) != nullptr;
       upsert_controller_config(db, config);
       validate_config_assignments(db, devices);
     });
-    if (already_registered) {
-      const std::string error = "address is already registered";
-      logger.log(vds::LogScope::Control, LogLevel::Warn,
-                 "attach rejected " + error + ": " + config.address);
-      return format_control_attach_reply(false, error, config);
-    }
   } catch (const std::exception &error) {
-    return format_control_attach_reply(false, error.what(), config);
+    return format_control_attach_reply(false, error.what(), config, false,
+                                       false);
   }
 
   reload_requested = true;
   logger.log(vds::LogScope::Control, LogLevel::Info,
-             "attached controller config " + format_controller_config(config));
-  return format_control_attach_reply(true, "", config);
+             (updated ? "updated controller config "
+                      : "attached controller config ") +
+                 format_controller_config(config));
+  return format_control_attach_reply(true, "", config, online, trusted);
 }
 
 std::string handle_detach_control_request(std::span<const JsonlField> fields,
@@ -687,6 +688,9 @@ std::string handle_trace_control_request(std::span<const JsonlField> fields,
     reject_unknown_jsonl_fields(fields, expected, context);
 
     const std::string mode = require_jsonl_string(fields, "mode", context);
+    if (mode == "status") {
+      return format_control_trace_reply(true, "", trace_flags);
+    }
     scope = parse_trace_scope(require_jsonl_string(fields, "scope", context));
     if (mode == "on") {
       trace_flags |= scope;
@@ -694,7 +698,7 @@ std::string handle_trace_control_request(std::span<const JsonlField> fields,
     } else if (mode == "off") {
       trace_flags &= ~scope;
     } else {
-      throw std::runtime_error("trace mode must be on or off");
+      throw std::runtime_error("trace mode must be on, off, or status");
     }
   } catch (const std::exception &error) {
     return format_control_trace_reply(false, error.what(), trace_flags);

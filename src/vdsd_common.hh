@@ -34,6 +34,7 @@ struct VdsdControlControllerStatus {
   std::string address;
   bool connected = false;
   std::string path;
+  std::string error;
 };
 
 struct VdsdControlPortStatus {

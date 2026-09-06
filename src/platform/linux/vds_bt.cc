@@ -140,8 +140,13 @@ UniqueFd listen_l2cap_psm(std::uint16_t psm) {
   if (::bind(fd.get(), reinterpret_cast<const struct sockaddr *>(&sockaddr),
              sizeof(sockaddr)) < 0) {
     const int error = errno;
-    throw BluetoothLinkError("failed to bind incoming " +
-                             psm_error(psm, error));
+    std::string message = "failed to bind incoming " + psm_error(psm, error);
+    if (error == EADDRINUSE) {
+      message += "; bluetoothd's input plugin owns the Bluetooth HID channels,"
+                 " run: sudo /usr/share/vds/override-bluetoothd.sh"
+                 " disable-input --restart";
+    }
+    throw BluetoothLinkError(message);
   }
   if (::listen(fd.get(), 1) < 0) {
     const int error = errno;
