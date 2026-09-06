@@ -14,6 +14,7 @@
 #include <fcntl.h>
 #include <sys/file.h>
 #include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "unique_fd.hh"
@@ -22,6 +23,8 @@
 namespace {
 
 constexpr mode_t kVdsFileMode = S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP;
+constexpr int kDbLockRetryBudgetMs = 100;
+constexpr int kDbLockRetrySleepMs = 5;
 
 std::filesystem::path db_directory(const std::filesystem::path &db_path) {
   const std::filesystem::path directory = db_path.parent_path();
@@ -64,7 +67,25 @@ std::unique_ptr<FileLock> lock_file(const std::filesystem::path &path) {
     throw std::runtime_error("failed to open DB directory " +
                              directory.string() + ": " + std::strerror(errno));
   }
-  if (::flock(fd.get(), LOCK_EX) < 0) {
+  // Bound the wait so a stuck locker cannot stall the epoll loop.
+  int waited_ms = 0;
+  while (::flock(fd.get(), LOCK_EX | LOCK_NB) < 0) {
+    if (errno == EINTR) {
+      continue;
+    }
+    if ((errno == EAGAIN || errno == EWOULDBLOCK) &&
+        waited_ms < kDbLockRetryBudgetMs) {
+      timespec sleep_for{};
+      sleep_for.tv_nsec =
+          static_cast<long>(kDbLockRetrySleepMs) * 1000000L;
+      if (::nanosleep(&sleep_for, nullptr) < 0 && errno != EINTR) {
+        throw std::runtime_error("failed to lock DB directory " +
+                                 directory.string() + ": " +
+                                 std::strerror(errno));
+      }
+      waited_ms += kDbLockRetrySleepMs;
+      continue;
+    }
     throw std::runtime_error("failed to lock DB directory " +
                              directory.string() + ": " + std::strerror(errno));
   }

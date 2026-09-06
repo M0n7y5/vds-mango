@@ -61,3 +61,7 @@
 !/src/**/*.hh
 !/src/**/*.hpp
 !/src/**/*.hxx
+
+!/tests/
+!/tests/*.cc
+!/tests/*.hh

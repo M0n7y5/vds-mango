@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (C) 2026 Jihong Min <hurryman2212@gmail.com>
 
+#include <algorithm>
 #include <cerrno>
 #include <cstring>
 #include <stdexcept>
