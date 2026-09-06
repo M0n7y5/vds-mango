@@ -8,6 +8,7 @@
 #include <string>
 
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <sys/un.h>
 #include <unistd.h>
 
@@ -19,6 +20,25 @@
 namespace {
 
 constexpr const char *kDefaultControlSocket = "/run/vdsd.sock";
+constexpr time_t kControlTimeoutSec = 5;
+
+bool is_socket_timeout() {
+  return errno == EAGAIN || errno == EWOULDBLOCK || errno == ETIMEDOUT;
+}
+
+void set_control_timeouts(int fd) {
+  const timeval timeout{.tv_sec = kControlTimeoutSec, .tv_usec = 0};
+  if (::setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout)) <
+      0) {
+    throw std::runtime_error("failed to set control send timeout: " +
+                             std::string(std::strerror(errno)));
+  }
+  if (::setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) <
+      0) {
+    throw std::runtime_error("failed to set control receive timeout: " +
+                             std::string(std::strerror(errno)));
+  }
+}
 
 std::string request_daemon(const std::string &socket_path,
                            const std::string &command) {
@@ -27,6 +47,8 @@ std::string request_daemon(const std::string &socket_path,
     throw std::runtime_error("failed to open daemon control socket: " +
                              std::string(std::strerror(errno)));
   }
+
+  set_control_timeouts(fd.get());
 
   sockaddr_un address{};
   address.sun_family = AF_UNIX;
@@ -38,11 +60,21 @@ std::string request_daemon(const std::string &socket_path,
 
   if (::connect(fd.get(), reinterpret_cast<const sockaddr *>(&address),
                 sizeof(address)) < 0) {
+    if (is_socket_timeout()) {
+      throw std::runtime_error("daemon is unresponsive: " + socket_path);
+    }
     throw std::runtime_error("failed to connect " + socket_path + ": " +
                              std::strerror(errno));
   }
 
-  vds::write_full(fd.get(), command);
+  try {
+    vds::write_full(fd.get(), command);
+  } catch (const std::runtime_error &) {
+    if (is_socket_timeout()) {
+      throw std::runtime_error("daemon is unresponsive: " + socket_path);
+    }
+    throw;
+  }
   (void)::shutdown(fd.get(), SHUT_WR);
 
   std::string response;
@@ -52,6 +84,9 @@ std::string request_daemon(const std::string &socket_path,
     if (got < 0) {
       if (errno == EINTR) {
         continue;
+      }
+      if (is_socket_timeout()) {
+        throw std::runtime_error("daemon is unresponsive: " + socket_path);
       }
       throw std::runtime_error("failed to read daemon response: " +
                                std::string(std::strerror(errno)));

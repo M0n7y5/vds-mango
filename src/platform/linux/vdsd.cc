@@ -25,7 +25,9 @@
 #include <poll.h>
 #include <signal.h>
 #include <sys/epoll.h>
+#include <sys/file.h>
 #include <sys/ioctl.h>
+#include <sys/signalfd.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
@@ -54,6 +56,7 @@ using vds::hex_bytes;
 using vds::hex_u8;
 
 constexpr const char *kDefaultControlSocket = "/run/vdsd.sock";
+constexpr const char *kInstanceLockPath = "/run/vdsd.lock";
 constexpr const char *kVirtualPortProviderUnavailableReason =
     "virtual port provider unavailable";
 constexpr const char *kLinuxVirtualPortProviderUnavailable =
@@ -86,8 +89,16 @@ constexpr auto kHapticsOutputBlockedRetry = std::chrono::milliseconds(2);
 constexpr auto kBluetoothPreemptWait = std::chrono::milliseconds(2000);
 constexpr auto kBluetoothPreemptPoll = std::chrono::milliseconds(100);
 constexpr int kInitialFeatureReportPollMs = 5000;
+constexpr unsigned kMaxAcceptFailures = 16;
+/*
+ * The loop is single threaded, so a control client that stalls stalls every
+ * pad. Bound the whole exchange instead of trusting the client.
+ */
+constexpr auto kControlClientTimeout = std::chrono::milliseconds(200);
+constexpr std::size_t kControlRequestMaxBytes = 4096;
 constexpr std::size_t kMaxPendingAudioChunks = 8;
 constexpr std::size_t kFreshPendingAudioChunks = 4;
+constexpr std::size_t kMaxPendingControlWrites = 16;
 constexpr std::uint8_t kTestCommandReportId = 0x80;
 constexpr std::uint8_t kTestCommandResultReportId = 0x81;
 constexpr std::uint8_t kTestCommandCompleteStatus = 0x02;
@@ -104,8 +115,10 @@ constexpr std::int16_t kSpeakerWaveoutAmplitude = 12000;
 constexpr std::array<std::uint8_t, 3> kInitialFeatureReportIds = {0x09, 0x20,
                                                                   0x05};
 
-volatile sig_atomic_t g_stop_requested = 0;
-volatile sig_atomic_t g_log_reopen_requested = 0;
+class PortIoError : public std::runtime_error {
+public:
+  using std::runtime_error::runtime_error;
+};
 
 struct Options {
   std::string socket = kDefaultControlSocket;
@@ -151,6 +164,9 @@ struct TraceState {
   bool audio_haptics_nonzero_seen = false;
   bool haptics_burst_active = false;
   std::uint64_t haptics_burst_chunks = 0;
+  std::uint64_t audio_encode_fail_count = 0;
+  std::uint64_t dropped_control_write_count = 0;
+  std::uint64_t coalesced_control_write_count = 0;
 };
 
 using vds::kTraceInputAudio;
@@ -158,6 +174,17 @@ using vds::kTraceInputControl;
 using vds::kTraceOutput;
 using vds::trace_enabled;
 using vds::trim_command;
+
+/*
+ * A feature GET or SET that cannot be written immediately. Queued rather than
+ * written with a blocking poll, because the single-threaded loop cannot afford
+ * to wait on one pad's congested control channel.
+ */
+struct PendingControlWrite {
+  std::uint8_t report_id = 0;
+  bool is_set = false;
+  std::vector<std::uint8_t> payload;
+};
 
 struct VirtualPort {
   std::string path;
@@ -168,6 +195,7 @@ struct VirtualPort {
   vds::HapticsPacketBuilder haptics_builder;
   vds::DsOutputState output_state;
   std::deque<vds::AudioChunk> pending_audio_chunks;
+  std::deque<PendingControlWrite> pending_control_writes;
   std::optional<vds::DsState> last_sent_bt_state;
   std::optional<vds::DsState> pending_bt_state;
   std::optional<vds::BtStateReport> pending_bt_state_report;
@@ -206,6 +234,7 @@ enum class EventType : std::uint32_t {
   BtAcceptControl = 5,
   BtAcceptInterrupt = 6,
   Udev = 7,
+  Signal = 8,
 };
 
 struct EventSource {
@@ -225,21 +254,53 @@ private:
   std::string path_;
 };
 
-void signal_handler(int signal) {
-  if (signal == SIGHUP) {
-    g_log_reopen_requested = 1;
-    return;
+struct SignalRequests {
+  bool stop = false;
+  bool log_reopen = false;
+};
+
+vds::UniqueFd create_signal_fd() {
+  sigset_t mask;
+  sigemptyset(&mask);
+  sigaddset(&mask, SIGINT);
+  sigaddset(&mask, SIGTERM);
+  sigaddset(&mask, SIGHUP);
+  /* signalfd only reports signals the process blocks. */
+  if (::sigprocmask(SIG_BLOCK, &mask, nullptr) < 0) {
+    throw std::runtime_error("sigprocmask failed: " +
+                             std::string(std::strerror(errno)));
   }
-  g_stop_requested = 1;
+
+  vds::UniqueFd fd(::signalfd(-1, &mask, SFD_NONBLOCK | SFD_CLOEXEC));
+  if (!fd) {
+    throw std::runtime_error("signalfd failed: " +
+                             std::string(std::strerror(errno)));
+  }
+  return fd;
 }
 
-void install_signal_handler(int signal) {
-  struct sigaction action{};
-  action.sa_handler = signal_handler;
-  sigemptyset(&action.sa_mask);
-  if (::sigaction(signal, &action, nullptr) < 0) {
-    throw std::runtime_error("sigaction failed: " +
-                             std::string(std::strerror(errno)));
+void drain_signal_fd(int fd, SignalRequests &requests) {
+  while (true) {
+    signalfd_siginfo info{};
+    const ssize_t got = ::read(fd, &info, sizeof(info));
+    if (got < 0) {
+      if (errno == EINTR) {
+        continue;
+      }
+      if (errno == EAGAIN || errno == EWOULDBLOCK) {
+        return;
+      }
+      throw std::runtime_error("signalfd read failed: " +
+                               std::string(std::strerror(errno)));
+    }
+    if (got != static_cast<ssize_t>(sizeof(info))) {
+      throw std::runtime_error("short signalfd read");
+    }
+    if (info.ssi_signo == SIGHUP) {
+      requests.log_reopen = true;
+      continue;
+    }
+    requests.stop = true;
   }
 }
 
@@ -277,8 +338,7 @@ Options parse_platform_args(int argc, char **argv) {
 int open_required(const std::string &path, int flags) {
   const int fd = ::open(path.c_str(), flags);
   if (fd < 0) {
-    throw std::runtime_error("failed to open " + path + ": " +
-                             std::strerror(errno));
+    throw PortIoError("failed to open " + path + ": " + std::strerror(errno));
   }
   return fd;
 }
@@ -436,7 +496,7 @@ bool write_vds_frame(VirtualPort &port, std::span<const std::uint8_t> bytes,
       return true;
     }
     if (written >= 0) {
-      throw std::runtime_error("short " + port.path + " frame write");
+      throw PortIoError("short " + port.path + " frame write");
     }
     if (errno == EINTR) {
       continue;
@@ -454,8 +514,7 @@ bool write_vds_frame(VirtualPort &port, std::span<const std::uint8_t> bytes,
       }
       return false;
     }
-    throw std::runtime_error("write failed: " +
-                             std::string(std::strerror(errno)));
+    throw PortIoError("write failed: " + std::string(std::strerror(errno)));
   }
 }
 
@@ -474,6 +533,66 @@ void cache_feature_report(VirtualPort &port,
   const auto frame = vds::frame_bytes(VDS_FRAME_USB_FEATURE_REPLY,
                                       port.feature_cache[report_id]);
   (void)write_vds_frame(port, frame, trace, logger);
+}
+
+bool try_send_control_write(vds::BtL2capBackend &bt_backend,
+                            const PendingControlWrite &write) {
+  if (write.is_set) {
+    return bt_backend.try_send_feature_set(write.payload);
+  }
+  return bt_backend.try_send_feature_get(write.report_id);
+}
+
+bool queue_control_write(VirtualPort &port, PendingControlWrite write,
+                         vds::BtL2capBackend &bt_backend,
+                         vds::Logger &logger) {
+  if (port.pending_control_writes.empty() &&
+      try_send_control_write(bt_backend, write)) {
+    return true;
+  }
+  /*
+   * Only the last entry is eligible, so a SET can never move across a queued
+   * GET for the same report and change what the host reads back.
+   */
+  if (write.is_set && !port.pending_control_writes.empty() &&
+      port.pending_control_writes.back().is_set &&
+      port.pending_control_writes.back().report_id == write.report_id) {
+    ++port.trace_state.coalesced_control_write_count;
+    port.pending_control_writes.back() = std::move(write);
+    return true;
+  }
+  if (port.pending_control_writes.size() >= kMaxPendingControlWrites) {
+    /*
+     * A refused GET is recoverable: the kernel URB times out and usbhid
+     * reissues GET_REPORT. An evicted SET is not, and could leave the pad in
+     * a state neither the old nor the new configuration describes.
+     */
+    ++port.trace_state.dropped_control_write_count;
+    if (port.trace_state.dropped_control_write_count == 1 ||
+        port.trace_state.dropped_control_write_count % 1000 == 0) {
+      logger.log(
+          vds::LogScope::Hid, vds::LogLevel::Warn,
+          port.path + " dropped queued BT feature write count=" +
+              std::to_string(port.trace_state.dropped_control_write_count) +
+              " coalesced=" +
+              std::to_string(port.trace_state.coalesced_control_write_count));
+    }
+    return false;
+  }
+  port.pending_control_writes.push_back(std::move(write));
+  return true;
+}
+
+bool flush_pending_control_writes(VirtualPort &port,
+                                  vds::BtL2capBackend &bt_backend) {
+  while (!port.pending_control_writes.empty()) {
+    if (!try_send_control_write(bt_backend,
+                                port.pending_control_writes.front())) {
+      return false;
+    }
+    port.pending_control_writes.pop_front();
+  }
+  return true;
 }
 
 bool flush_pending_bt_state_report(VirtualPort &port,
@@ -570,8 +689,7 @@ void forward_bt_state_if_changed(VirtualPort &port,
 
 void ioctl_noarg(int fd, unsigned long request, const char *name) {
   if (::ioctl(fd, request) < 0) {
-    throw std::runtime_error(std::string(name) +
-                             " failed: " + std::strerror(errno));
+    throw PortIoError(std::string(name) + " failed: " + std::strerror(errno));
   }
 }
 
@@ -581,8 +699,8 @@ void ioctl_set_profile(int fd, std::uint32_t profile) {
       .polling_rate_mode = 0,
   };
   if (::ioctl(fd, VDS_IOC_SET_PROFILE, &config) < 0) {
-    throw std::runtime_error("VDS_IOC_SET_PROFILE failed: " +
-                             std::string(std::strerror(errno)));
+    throw PortIoError("VDS_IOC_SET_PROFILE failed: " +
+                      std::string(std::strerror(errno)));
   }
 }
 
@@ -593,6 +711,7 @@ void reset_virtual_port(VirtualPort &port) {
   port.haptics_builder = vds::HapticsPacketBuilder{};
   port.output_state = vds::DsOutputState{};
   port.pending_audio_chunks.clear();
+  port.pending_control_writes.clear();
   port.last_sent_bt_state.reset();
   port.pending_bt_state.reset();
   port.pending_bt_state_report.reset();
@@ -614,6 +733,7 @@ void reset_virtual_port(VirtualPort &port) {
 
 void disconnect_virtual_port(VirtualPort &port, vds::Logger &logger) {
   port.pending_audio_chunks.clear();
+  port.pending_control_writes.clear();
   port.next_haptics_send_time = {};
   port.audio_out_stream_active = false;
   port.audio_in_stream_active = false;
@@ -628,6 +748,19 @@ void disconnect_virtual_port(VirtualPort &port, vds::Logger &logger) {
   } catch (const std::exception &error) {
     logger.log(vds::LogScope::Usb, vds::LogLevel::Warn,
                port.path + " disconnect failed: " + error.what());
+  }
+}
+
+void log_audio_encode_failure(VirtualPort &port,
+                              const std::runtime_error &error,
+                              vds::Logger &logger) {
+  ++port.trace_state.audio_encode_fail_count;
+  if (port.trace_state.audio_encode_fail_count == 1 ||
+      port.trace_state.audio_encode_fail_count % 1000 == 0) {
+    logger.log(vds::LogScope::Output, vds::LogLevel::Warn,
+               port.path + " audio encode failed count=" +
+                   std::to_string(port.trace_state.audio_encode_fail_count) +
+                   ": " + error.what());
   }
 }
 
@@ -798,7 +931,15 @@ void handle_frame(const vds_frame_header &header,
     }
     if (bt_backend) {
       port.pending_feature_reports.push_back(report_id);
-      bt_backend->send_feature_get(report_id);
+      if (!queue_control_write(port,
+                               PendingControlWrite{
+                                   .report_id = report_id,
+                                   .is_set = false,
+                                   .payload = {},
+                               },
+                               *bt_backend, logger)) {
+        port.pending_feature_reports.pop_back();
+      }
     }
     if (output_trace) {
       trace_output_latency(
@@ -892,7 +1033,14 @@ void handle_frame(const vds_frame_header &header,
       }
     }
     if (bt_backend) {
-      bt_backend->send_feature_set(payload);
+      (void)queue_control_write(port,
+                                PendingControlWrite{
+                                    .report_id = report_id,
+                                    .is_set = true,
+                                    .payload = std::vector<std::uint8_t>(
+                                        payload.begin(), payload.end()),
+                                },
+                                *bt_backend, logger);
     }
     if (output_trace) {
       trace_output_latency(
@@ -914,7 +1062,14 @@ void handle_frame(const vds_frame_header &header,
   std::size_t dropped_chunks = 0;
   const auto audio_start = Clock::now();
   const auto extract_start = Clock::now();
-  const auto chunks = port.extractor.push_usb_audio(payload);
+  std::vector<vds::AudioChunk> chunks;
+  try {
+    chunks = port.extractor.push_usb_audio(payload);
+  } catch (const std::runtime_error &error) {
+    /* Audio is lossy by design, so a failed encode drops the frame. */
+    log_audio_encode_failure(port, error, logger);
+    return;
+  }
   const auto extract_duration = Clock::now() - extract_start;
   for (const auto &chunk : chunks) {
     if (output_trace) {
@@ -989,25 +1144,25 @@ bool handle_vds_frame(VirtualPort &port, vds::BtL2capBackend *bt_backend,
       frame;
   const ssize_t got = ::read(port.fd.get(), frame.data(), frame.size());
   if (got == 0) {
-    throw std::runtime_error(port.path + " closed");
+    throw PortIoError(port.path + " closed");
   }
   if (got < 0) {
     if (errno == EINTR || errno == EAGAIN) {
       return false;
     }
-    throw std::runtime_error(
-        port.path + " read failed: " + std::string(std::strerror(errno)));
+    throw PortIoError(port.path +
+                      " read failed: " + std::string(std::strerror(errno)));
   }
   if (static_cast<std::size_t>(got) < sizeof(vds_frame_header)) {
-    throw std::runtime_error(port.path + " short VDS frame header");
+    throw PortIoError(port.path + " short VDS frame header");
   }
   vds_frame_header header{};
   std::memcpy(&header, frame.data(), sizeof(header));
   if (header.length > VDS_FRAME_MAX_PAYLOAD) {
-    throw std::runtime_error(port.path + " oversized VDS frame");
+    throw PortIoError(port.path + " oversized VDS frame");
   }
   if (static_cast<std::size_t>(got) != sizeof(header) + header.length) {
-    throw std::runtime_error(port.path + " short VDS frame payload");
+    throw PortIoError(port.path + " short VDS frame payload");
   }
   const std::span payload(frame.data() + sizeof(header), header.length);
   handle_frame(header, payload, bt_backend, trace_flags, port, logger);
@@ -1139,9 +1294,9 @@ bool handle_bt_input(VirtualPort &port, vds::BtL2capBackend &bt_backend,
   }
   if (mic_mute_changed ||
       (headset_mic_changed && port.audio_in_stream_active)) {
-    const auto report = port.output_state.build_bt_mic_state_report(
+    const auto mic_state_report = port.output_state.build_bt_mic_state_report(
         port.audio_in_stream_active, port.mic_muted);
-    bt_backend.try_send_output_report(report);
+    bt_backend.try_send_output_report(mic_state_report);
     if (input_trace) {
       logger.log(vds::LogScope::InputControl, vds::LogLevel::Info,
                  port.path + " mic " +
@@ -1255,20 +1410,27 @@ bool handle_bt_control(VirtualPort &port, vds::BtL2capBackend &bt_backend,
   return true;
 }
 
-bool is_bluetooth_error(const std::exception &error) {
-  return std::string_view(error.what()).rfind("Bluetooth L2CAP", 0) == 0 ||
-         std::string_view(error.what())
-                 .rfind("failed to connect Bluetooth", 0) == 0;
-}
-
 void initialize_bt_controller(vds::BtL2capBackend &bt_backend,
                               VirtualPort &port, vds::Logger &logger) {
+  /*
+   * One budget for the whole handshake. A per-poll timeout restarts on every
+   * packet, so a chatty pad could hold the single-threaded loop indefinitely.
+   */
+  const auto deadline =
+      Clock::now() + std::chrono::milliseconds(kInitialFeatureReportPollMs);
   for (const std::uint8_t report_id : kInitialFeatureReportIds) {
     bt_backend.send_feature_get(report_id);
 
     while (true) {
+      const auto remaining = deadline - Clock::now();
+      const int wait_ms =
+          remaining <= Clock::duration::zero()
+              ? 0
+              : static_cast<int>(
+                    std::chrono::ceil<std::chrono::milliseconds>(remaining)
+                        .count());
       pollfd pfd{.fd = bt_backend.control_fd(), .events = POLLIN, .revents = 0};
-      const int ready = ::poll(&pfd, 1, kInitialFeatureReportPollMs);
+      const int ready = ::poll(&pfd, 1, wait_ms);
       if (ready < 0 && errno == EINTR) {
         continue;
       }
@@ -1438,18 +1600,52 @@ void sync_virtual_ports(std::vector<VirtualPort> &ports,
       continue;
     }
 
-    vds::UniqueFd fd(open_required(device, O_RDWR | O_NONBLOCK | O_CLOEXEC));
+    vds::UniqueFd fd;
+    try {
+      fd = vds::UniqueFd(
+          open_required(device, O_RDWR | O_NONBLOCK | O_CLOEXEC));
+    } catch (const PortIoError &error) {
+      logger.log(vds::LogScope::Port, vds::LogLevel::Warn,
+                 std::string(error.what()) + "; skipping port");
+      continue;
+    }
     vds_driver_info driver_info{};
     std::string driver_message = "driver connected name=vds_hcd path=" + device;
     vds::LogLevel driver_log_level = vds::LogLevel::Info;
     if (::ioctl(fd.get(), VDS_IOC_GET_DRIVER_INFO, &driver_info) < 0) {
+      if (errno == ENOTTY) {
+        logger.log(vds::LogScope::Port, vds::LogLevel::Error,
+                   "driver ABI mismatch name=vds_hcd path=" + device +
+                       " daemon_version=" +
+                       std::to_string(VDS_DRIVER_INFO_VERSION) +
+                       " detail=module predates VDS_IOC_GET_DRIVER_INFO; "
+                       "rebuild vds_hcd with \"sudo make -C module install\", "
+                       "then reload it with \"sudo modprobe -r vds_hcd && "
+                       "sudo modprobe vds_hcd\"");
+        continue;
+      }
       driver_log_level = vds::LogLevel::Warn;
       driver_message =
           "driver version unavailable name=vds_hcd path=" + device +
           " detail=" + std::strerror(errno);
     } else if (driver_info.version != VDS_DRIVER_INFO_VERSION ||
-               driver_info.size != sizeof(driver_info) ||
-               driver_info.driver_version[0] == '\0' ||
+               driver_info.size != sizeof(driver_info)) {
+      /*
+       * The frame path is not negotiated, so a module that disagrees about
+       * the ABI would silently misread every frame. Refuse the port instead.
+       */
+      logger.log(vds::LogScope::Port, vds::LogLevel::Error,
+                 "driver ABI mismatch name=vds_hcd path=" + device +
+                     " daemon_version=" +
+                     std::to_string(VDS_DRIVER_INFO_VERSION) +
+                     " module_version=" + std::to_string(driver_info.version) +
+                     " daemon_size=" + std::to_string(sizeof(driver_info)) +
+                     " module_size=" + std::to_string(driver_info.size) +
+                     " detail=rebuild vds_hcd with \"sudo make -C module "
+                     "install\", then reload it with \"sudo modprobe -r "
+                     "vds_hcd && sudo modprobe vds_hcd\"");
+      continue;
+    } else if (driver_info.driver_version[0] == '\0' ||
                driver_info.driver_version[VDS_DRIVER_VERSION_MAX - 1] != '\0') {
       driver_log_level = vds::LogLevel::Warn;
       driver_message =
@@ -1466,9 +1662,11 @@ void sync_virtual_ports(std::vector<VirtualPort> &ports,
         .fd = std::move(fd),
         .extractor = vds::PcmAudioExtractor{},
         .waveout_extractor = vds::PcmAudioExtractor{},
+        .mic_decoder = vds::MicAudioDecoder{},
         .haptics_builder = {},
         .output_state = {},
         .pending_audio_chunks = {},
+        .pending_control_writes = {},
         .last_sent_bt_state = std::nullopt,
         .pending_bt_state = std::nullopt,
         .pending_bt_state_report = std::nullopt,
@@ -1562,10 +1760,27 @@ void complete_pending_controller(ControllerRuntime &controller,
 void handle_bt_accept(std::vector<VirtualPort> &ports,
                       std::vector<ControllerRuntime> &controllers,
                       vds::BtL2capAcceptor &acceptor, bool control_channel,
-                      vds::Logger &logger, bool &epoll_dirty) {
+                      vds::Logger &logger, bool &epoll_dirty,
+                      unsigned &accept_failures) {
   while (true) {
-    auto accepted = control_channel ? acceptor.accept_control()
-                                    : acceptor.accept_interrupt();
+    std::optional<vds::BtAcceptedChannel> accepted;
+    try {
+      accepted = control_channel ? acceptor.accept_control()
+                                 : acceptor.accept_interrupt();
+    } catch (const vds::BluetoothLinkError &error) {
+      /*
+       * A connection that cannot be accepted stays queued and keeps the
+       * listener readable, so a permanent failure such as EMFILE would spin
+       * the loop. Escalate to fatal once retrying has clearly stopped
+       * helping; a per-connection failure resets the count below.
+       */
+      if (++accept_failures >= kMaxAcceptFailures) {
+        throw;
+      }
+      logger.log(vds::LogScope::Bluetooth, vds::LogLevel::Error, error.what());
+      return;
+    }
+    accept_failures = 0;
     if (!accepted) {
       return;
     }
@@ -1673,6 +1888,7 @@ bool has_pending_bt_output(std::span<const VirtualPort> ports,
     const auto port_index = find_port_index(ports, controller.device);
     if (port_index && (ports[*port_index].pending_bt_state_report ||
                        !ports[*port_index].pending_audio_chunks.empty() ||
+                       !ports[*port_index].pending_control_writes.empty() ||
                        ports[*port_index].speaker_waveout_active)) {
       return true;
     }
@@ -1815,7 +2031,13 @@ void enqueue_speaker_waveout_chunk(VirtualPort &port, std::uint32_t trace_flags,
     }
   }
 
-  const auto chunks = port.waveout_extractor.push_usb_audio(pcm);
+  std::vector<vds::AudioChunk> chunks;
+  try {
+    chunks = port.waveout_extractor.push_usb_audio(pcm);
+  } catch (const std::runtime_error &error) {
+    log_audio_encode_failure(port, error, logger);
+    return;
+  }
   for (const auto &chunk : chunks) {
     if (port.pending_audio_chunks.size() >= kMaxPendingAudioChunks) {
       break;
@@ -1850,6 +2072,8 @@ void flush_pending_outputs(std::vector<VirtualPort> &ports,
 
     try {
       auto &port = ports[*port_index];
+      /* Control uses PSM 0x0011; the drains below share PSM 0x0013. */
+      (void)flush_pending_control_writes(port, *controller.backend);
       if (!flush_pending_bt_state_report(port, *controller.backend, trace_flags,
                                          logger)) {
         continue;
@@ -1857,10 +2081,7 @@ void flush_pending_outputs(std::vector<VirtualPort> &ports,
       enqueue_speaker_waveout_chunk(port, trace_flags, logger);
       (void)flush_pending_audio_chunk(port, *controller.backend, trace_flags,
                                       logger);
-    } catch (const std::exception &error) {
-      if (!is_bluetooth_error(error)) {
-        throw;
-      }
+    } catch (const vds::BluetoothLinkError &error) {
       drop_bt_backend(controller, ports[*port_index], error.what(), logger);
       epoll_dirty = true;
     }
@@ -1915,7 +2136,18 @@ void reconcile_controller_configs(std::vector<VirtualPort> &ports,
                      " reason=no allowed virtual port present ports=[" +
                      vds::format_ports(config.ports) + "]");
     }
-    if (virtual_port_provider_available) {
+    /*
+     * Kick BlueZ off addresses that are new to this reload. The connect-time
+     * preempt never fires while BlueZ still owns the pad (the raw channels
+     * never arrive), and preempting unchanged addresses would stall every
+     * reload for up to 2 s each.
+     */
+    const bool is_new_address =
+        std::none_of(controllers.begin(), controllers.end(),
+                     [&](const ControllerRuntime &old) {
+                       return old.config.address == config.address;
+                     });
+    if (virtual_port_provider_available && is_new_address) {
       preempt_default_bluetooth_owner(config.address, logger);
     }
     ControllerRuntime next{
@@ -2008,33 +2240,91 @@ void handle_control_client(int control_fd, std::span<VirtualPort> ports,
                            std::span<ControllerRuntime> controllers,
                            const std::string &db_path,
                            std::uint32_t &trace_flags, bool &reload_requested,
-                           vds::Logger &logger) {
+                           vds::Logger &logger, unsigned &accept_failures) {
   vds::UniqueFd client_fd(
-      ::accept4(control_fd, nullptr, nullptr, SOCK_CLOEXEC));
+      ::accept4(control_fd, nullptr, nullptr, SOCK_CLOEXEC | SOCK_NONBLOCK));
   if (!client_fd) {
     if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
       return;
     }
-    throw std::runtime_error("accept control client failed: " +
-                             std::string(std::strerror(errno)));
+    /*
+     * An unaccepted connection stays queued and keeps the listener readable,
+     * so a permanent failure such as EMFILE would spin the loop. Escalate to
+     * fatal once retrying has clearly stopped helping, mirroring
+     * handle_bt_accept.
+     */
+    if (++accept_failures >= kMaxAcceptFailures) {
+      throw std::runtime_error("accept control client failed: " +
+                               std::string(std::strerror(errno)));
+    }
+    logger.log(vds::LogScope::Control, vds::LogLevel::Error,
+               "accept control client failed: " +
+                   std::string(std::strerror(errno)));
+    return;
   }
+  accept_failures = 0;
 
-  std::array<char, 256> buffer{};
-  ssize_t got = 0;
-  do {
-    got = ::read(client_fd.get(), buffer.data(), buffer.size() - 1);
-  } while (got < 0 && errno == EINTR);
-  if (got < 0) {
-    throw std::runtime_error("read control client failed: " +
-                             std::string(std::strerror(errno)));
+  const auto deadline = Clock::now() + kControlClientTimeout;
+  std::string request;
+  while (request.find('\n') == std::string::npos) {
+    std::array<char, 256> buffer{};
+    const ssize_t got = ::read(client_fd.get(), buffer.data(), buffer.size());
+    if (got > 0) {
+      if (request.size() + static_cast<std::size_t>(got) >
+          kControlRequestMaxBytes) {
+        logger.log(vds::LogScope::Control, vds::LogLevel::Warn,
+                   "control request too long; dropping client");
+        return;
+      }
+      request.append(buffer.data(), static_cast<std::size_t>(got));
+      continue;
+    }
+    if (got == 0) {
+      break;
+    }
+    if (errno == EINTR) {
+      continue;
+    }
+    if (errno != EAGAIN && errno != EWOULDBLOCK) {
+      logger.log(vds::LogScope::Control, vds::LogLevel::Warn,
+                 "control client read failed: " +
+                     std::string(std::strerror(errno)));
+      return;
+    }
+
+    const auto now = Clock::now();
+    if (now >= deadline) {
+      logger.log(vds::LogScope::Control, vds::LogLevel::Warn,
+                 "control request timed out; dropping client");
+      return;
+    }
+    pollfd pfd{.fd = client_fd.get(), .events = POLLIN, .revents = 0};
+    const int ready = ::poll(
+        &pfd, 1,
+        static_cast<int>(
+            std::chrono::ceil<std::chrono::milliseconds>(deadline - now)
+                .count()));
+    if (ready < 0) {
+      if (errno == EINTR) {
+        continue;
+      }
+      logger.log(vds::LogScope::Control, vds::LogLevel::Warn,
+                 "control client poll failed: " +
+                     std::string(std::strerror(errno)));
+      return;
+    }
+    if (ready == 0) {
+      logger.log(vds::LogScope::Control, vds::LogLevel::Warn,
+                 "control request timed out; dropping client");
+      return;
+    }
   }
-  if (got <= 0) {
+  if (request.empty()) {
     return;
   }
 
   std::string reply;
-  const std::string command =
-      trim_command(std::string(buffer.data(), static_cast<std::size_t>(got)));
+  const std::string command = trim_command(request);
   std::vector<vds::VdsdControlControllerStatus> controller_statuses;
   controller_statuses.reserve(controllers.size());
   for (const auto &controller : controllers) {
@@ -2085,12 +2375,21 @@ void handle_control_client(int control_fd, std::span<VirtualPort> ports,
       reload_requested, logger);
 
   try {
-    vds::write_full(client_fd.get(), reply);
+    const auto now = Clock::now();
+    const int reply_timeout_ms =
+        now >= deadline
+            ? 0
+            : static_cast<int>(
+                  std::chrono::ceil<std::chrono::milliseconds>(deadline - now)
+                      .count());
+    vds::write_full(client_fd.get(),
+                    std::span(reinterpret_cast<const std::uint8_t *>(
+                                  reply.data()),
+                              reply.size()),
+                    "control reply", reply_timeout_ms);
   } catch (const std::exception &error) {
-    if (trace_flags != 0) {
-      logger.log(vds::LogScope::Control, vds::LogLevel::Error,
-                 std::string("reply failed: ") + error.what());
-    }
+    logger.log(vds::LogScope::Control, vds::LogLevel::Warn,
+               std::string("control reply failed: ") + error.what());
   }
 }
 
@@ -2116,7 +2415,8 @@ void add_epoll_fd(int epoll_fd, int fd, EventType type, std::size_t index) {
   }
 }
 
-vds::UniqueFd rebuild_epoll(int control_fd, vds::BtL2capAcceptor &bt_acceptor,
+vds::UniqueFd rebuild_epoll(int control_fd, int signal_fd,
+                            vds::BtL2capAcceptor &bt_acceptor,
                             const vds::VdsDeviceMonitor &vds_monitor,
                             std::span<VirtualPort> ports,
                             std::span<ControllerRuntime> controllers) {
@@ -2127,12 +2427,16 @@ vds::UniqueFd rebuild_epoll(int control_fd, vds::BtL2capAcceptor &bt_acceptor,
   }
 
   add_epoll_fd(epoll_fd.get(), control_fd, EventType::Control, 0);
+  add_epoll_fd(epoll_fd.get(), signal_fd, EventType::Signal, 0);
   add_epoll_fd(epoll_fd.get(), vds_monitor.fd(), EventType::Udev, 0);
   add_epoll_fd(epoll_fd.get(), bt_acceptor.control_listener_fd(),
                EventType::BtAcceptControl, 0);
   add_epoll_fd(epoll_fd.get(), bt_acceptor.interrupt_listener_fd(),
                EventType::BtAcceptInterrupt, 0);
   for (std::size_t i = 0; i < ports.size(); ++i) {
+    if (!ports[i].fd) {
+      continue;
+    }
     add_epoll_fd(epoll_fd.get(), ports[i].fd.get(), EventType::Port, i);
   }
   for (std::size_t i = 0; i < controllers.size(); ++i) {
@@ -2162,14 +2466,28 @@ void disconnect_all(std::vector<VirtualPort> &ports,
   controllers.clear();
 }
 
+vds::UniqueFd acquire_single_instance_lock(const char *path) {
+  vds::UniqueFd fd(::open(path, O_RDWR | O_CREAT | O_CLOEXEC, 0644));
+  if (!fd) {
+    throw std::runtime_error("failed to open lock file " + std::string(path) +
+                             ": " + std::strerror(errno));
+  }
+  if (::flock(fd.get(), LOCK_EX | LOCK_NB) < 0) {
+    if (errno == EWOULDBLOCK) {
+      throw std::runtime_error("another vdsd instance already holds " +
+                               std::string(path));
+    }
+    throw std::runtime_error("failed to lock " + std::string(path) + ": " +
+                             std::strerror(errno));
+  }
+  return fd;
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
   try {
     ::signal(SIGPIPE, SIG_IGN);
-    install_signal_handler(SIGINT);
-    install_signal_handler(SIGTERM);
-    install_signal_handler(SIGHUP);
 
     const Options options = parse_platform_args(argc, argv);
     vds::Logger logger(options.log_path);
@@ -2183,6 +2501,10 @@ int main(int argc, char **argv) {
       throw std::runtime_error(kLinuxVirtualPortProviderUnavailable);
     }
 
+    const vds::UniqueFd signal_fd = create_signal_fd();
+    const vds::UniqueFd instance_lock =
+        acquire_single_instance_lock(kInstanceLockPath);
+
     vds::UniqueFd control_fd(open_control_socket(options.socket));
     vds::BtL2capAcceptor bt_acceptor;
     vds::VdsDeviceMonitor vds_monitor;
@@ -2195,10 +2517,14 @@ int main(int argc, char **argv) {
     std::uint32_t trace_flags = 0;
     bool reload_requested = true;
     bool epoll_dirty = true;
+    bool first_reload = true;
+    unsigned bt_accept_failures = 0;
+    unsigned control_accept_failures = 0;
+    SignalRequests signals;
 
-    while (g_stop_requested == 0) {
-      if (g_log_reopen_requested != 0) {
-        g_log_reopen_requested = 0;
+    while (!signals.stop) {
+      if (signals.log_reopen) {
+        signals.log_reopen = false;
         try {
           logger.reopen();
           logger.log(vds::LogScope::Daemon, vds::LogLevel::Info,
@@ -2215,15 +2541,20 @@ int main(int argc, char **argv) {
                                        logger);
           epoll_dirty = true;
         } catch (const std::exception &error) {
+          /* Starting with no usable state is a setup failure, not a reload. */
+          if (first_reload) {
+            throw;
+          }
           logger.log(vds::LogScope::Config, vds::LogLevel::Error,
                      std::string("reload failed: ") + error.what());
         }
         reload_requested = false;
+        first_reload = false;
       }
 
       if (epoll_dirty || !epoll_fd) {
-        epoll_fd = rebuild_epoll(control_fd.get(), bt_acceptor, vds_monitor,
-                                 ports, controllers);
+        epoll_fd = rebuild_epoll(control_fd.get(), signal_fd.get(), bt_acceptor,
+                                 vds_monitor, ports, controllers);
         epoll_dirty = false;
       }
 
@@ -2249,11 +2580,19 @@ int main(int argc, char **argv) {
         const EventSource source = decode_event(events[i].data.u64);
         const std::uint32_t revents = events[i].events;
 
+        if (source.type == EventType::Signal) {
+          if ((revents & EPOLLIN) != 0) {
+            drain_signal_fd(signal_fd.get(), signals);
+          }
+          continue;
+        }
+
         if (source.type == EventType::Control) {
           if ((revents & EPOLLIN) != 0) {
             handle_control_client(control_fd.get(), ports, controllers,
                                   options.db_path, trace_flags,
-                                  reload_requested, logger);
+                                  reload_requested, logger,
+                                  control_accept_failures);
           }
           if ((revents & (EPOLLERR | EPOLLHUP)) != 0) {
             throw std::runtime_error("control socket epoll error");
@@ -2266,7 +2605,7 @@ int main(int argc, char **argv) {
           if ((revents & EPOLLIN) != 0) {
             handle_bt_accept(ports, controllers, bt_acceptor,
                              source.type == EventType::BtAcceptControl, logger,
-                             epoll_dirty);
+                             epoll_dirty, bt_accept_failures);
           }
           if ((revents & (EPOLLERR | EPOLLHUP)) != 0) {
             throw std::runtime_error("Bluetooth listener epoll error");
@@ -2303,11 +2642,17 @@ int main(int argc, char **argv) {
                 if (!handle_vds_frame(port, backend, trace_flags, logger)) {
                   break;
                 }
-              } catch (const std::exception &error) {
-                if (!is_bluetooth_error(error) || !controller) {
+              } catch (const vds::BluetoothLinkError &error) {
+                if (!controller) {
                   throw;
                 }
                 drop_bt_backend(*controller, port, error.what(), logger);
+                epoll_dirty = true;
+                break;
+              } catch (const PortIoError &error) {
+                logger.log(vds::LogScope::Port, vds::LogLevel::Error,
+                           std::string(error.what()) + "; reloading ports");
+                reload_requested = true;
                 epoll_dirty = true;
                 break;
               }
@@ -2344,11 +2689,14 @@ int main(int argc, char **argv) {
                                        logger)) {
                   break;
                 }
-              } catch (const std::exception &error) {
-                if (!is_bluetooth_error(error)) {
-                  throw;
-                }
+              } catch (const vds::BluetoothLinkError &error) {
                 drop_bt_backend(controller, port, error.what(), logger);
+                epoll_dirty = true;
+                break;
+              } catch (const PortIoError &error) {
+                logger.log(vds::LogScope::Port, vds::LogLevel::Error,
+                           std::string(error.what()) + "; reloading ports");
+                reload_requested = true;
                 epoll_dirty = true;
                 break;
               }
@@ -2370,11 +2718,14 @@ int main(int argc, char **argv) {
                                      logger)) {
                   break;
                 }
-              } catch (const std::exception &error) {
-                if (!is_bluetooth_error(error)) {
-                  throw;
-                }
+              } catch (const vds::BluetoothLinkError &error) {
                 drop_bt_backend(controller, port, error.what(), logger);
+                epoll_dirty = true;
+                break;
+              } catch (const PortIoError &error) {
+                logger.log(vds::LogScope::Port, vds::LogLevel::Error,
+                           std::string(error.what()) + "; reloading ports");
+                reload_requested = true;
                 epoll_dirty = true;
                 break;
               }

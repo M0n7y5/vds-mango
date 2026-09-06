@@ -5,12 +5,18 @@
 #include <cstdint>
 #include <optional>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
 #include "unique_fd.hh"
 
 namespace vds {
+
+class BluetoothLinkError : public std::runtime_error {
+public:
+  using std::runtime_error::runtime_error;
+};
 
 struct BtAcceptedChannel {
   std::string address;
@@ -52,7 +58,8 @@ public:
   void send_output_report(std::span<const std::uint8_t> report);
   bool try_send_output_report(std::span<const std::uint8_t> report);
   void send_feature_get(std::uint8_t report_id);
-  void send_feature_set(std::span<const std::uint8_t> report);
+  bool try_send_feature_get(std::uint8_t report_id);
+  bool try_send_feature_set(std::span<const std::uint8_t> report);
   std::optional<std::vector<std::uint8_t>> read_feature_report();
   std::optional<std::vector<std::uint8_t>> read_interrupt_packet();
 

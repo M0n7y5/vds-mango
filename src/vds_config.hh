@@ -61,6 +61,7 @@ select_controller_config_port(const ControllerConfig &config,
 const ControllerConfig *
 find_controller_config_by_address(const ConfigDb &db, std::string_view address);
 ConfigDb load_config_db(const std::string &path);
+ConfigDb parse_config_db(std::string_view text);
 ConfigDb update_config_db(const std::string &path,
                           const std::function<void(ConfigDb &)> &update);
 void upsert_controller_config(ConfigDb &db, ControllerConfig config);

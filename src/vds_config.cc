@@ -101,6 +101,10 @@ vds::ControllerConfig parse_controller_line(const std::string &line,
   return config;
 }
 
+} // namespace
+
+namespace vds {
+
 vds::ConfigDb parse_config_db(std::string_view text) {
   vds::ConfigDb db;
   std::istringstream stream{std::string(text)};
@@ -129,10 +133,6 @@ vds::ConfigDb parse_config_db(std::string_view text) {
   }
   return db;
 }
-
-} // namespace
-
-namespace vds {
 
 std::string normalize_bluetooth_address(std::string_view address) {
   if (address.size() != 17) {

@@ -5,6 +5,7 @@ project(vds LANGUAGES CXX)
 option(INSTALL_SERVICE "Register vdsd as a system service during install" OFF)
 option(STOP_SERVICE "Stop vdsd before service install or uninstall" ON)
 mark_as_advanced(STOP_SERVICE)
+option(BUILD_TESTS "Build unit tests" OFF)
 
 include(GNUInstallDirs)
 if(WIN32 AND CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
@@ -29,6 +30,23 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+  set(CMAKE_BUILD_TYPE
+      RelWithDebInfo
+      CACHE STRING "Build type" FORCE)
+endif()
+
+if(NOT WIN32)
+  # -U before -D must share the options list: definitions are emitted before
+  # flags, and some distros predefine _FORTIFY_SOURCE=2 in the toolchain.
+  add_compile_options(-Wall -Wextra -Wshadow -Wformat=2
+                      -Werror=format-security -fstack-protector-strong -fPIE
+                      $<$<NOT:$<CONFIG:Debug>>:-U_FORTIFY_SOURCE>
+                      $<$<NOT:$<CONFIG:Debug>>:-D_FORTIFY_SOURCE=3>)
+  # add_link_options() needs CMake 3.13; this file declares 3.12.
+  string(APPEND CMAKE_EXE_LINKER_FLAGS " -Wl,-z,relro -Wl,-z,now -pie")
+endif()
 
 set(VDS_GENERATED_DIR ${CMAKE_CURRENT_BINARY_DIR}/generated)
 set(VDS_BUILD_INFO_HEADER ${VDS_GENERATED_DIR}/vds_build_info.hh)
@@ -93,7 +111,46 @@ add_library(vdsd_common OBJECT src/vdsd_common.cc)
 target_include_directories(
   vdsd_common PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
                      ${CMAKE_CURRENT_SOURCE_DIR}/src)
-target_link_libraries(vdsd_common PUBLIC jsonl)
+target_link_libraries(vdsd_common PUBLIC jsonl vds_config vds_log)
+
+if(BUILD_TESTS AND NOT WIN32)
+  enable_testing()
+  add_library(vds_test_support OBJECT tests/vds_check.cc)
+  target_include_directories(vds_test_support
+                             PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+
+  add_executable(test_jsonl tests/test_jsonl.cc)
+  target_link_libraries(test_jsonl PRIVATE vds_test_support jsonl)
+  add_test(NAME jsonl COMMAND test_jsonl
+           WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+
+  add_executable(test_config tests/test_config.cc)
+  target_link_libraries(test_config PRIVATE vds_test_support vds_config jsonl
+                                            vds_common)
+  add_test(NAME config COMMAND test_config
+           WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+
+  add_executable(test_protocol_feature_set tests/test_protocol.cc)
+  target_compile_definitions(test_protocol_feature_set PRIVATE VDS_TEST_L11C)
+  target_link_libraries(test_protocol_feature_set PRIVATE vds_test_support
+                                                          vds_protocol
+                                                          ${VDS_OPUS_TARGET})
+  add_test(NAME protocol_feature_set COMMAND test_protocol_feature_set
+           WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+  # L11c: asserts the USB tail survives feature_set_packet. UNVERIFIED
+  # contract: current code writes the DualSense BT CRC over the tail, matching
+  # the pad's GET framing. Keep WILL_FAIL until settled on hardware; do not
+  # "fix" the code to satisfy this test without pad evidence.
+  set_tests_properties(protocol_feature_set PROPERTIES WILL_FAIL TRUE)
+
+  add_executable(test_protocol_bt_input tests/test_protocol.cc)
+  target_compile_definitions(test_protocol_bt_input PRIVATE VDS_TEST_L12)
+  target_link_libraries(test_protocol_bt_input PRIVATE vds_test_support
+                                                       vds_protocol
+                                                       ${VDS_OPUS_TARGET})
+  add_test(NAME protocol_bt_input COMMAND test_protocol_bt_input
+           WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+endif()
 
 if(WIN32)
   add_library(vds_bt OBJECT src/platform/win32/vds_bt.cc)

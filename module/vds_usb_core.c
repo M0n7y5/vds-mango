@@ -10,6 +10,7 @@
 
 #include <linux/errno.h>
 #include <linux/hid.h>
+#include <linux/minmax.h>
 #include <linux/string.h>
 
 #include "uapi/vds.h"
@@ -344,7 +345,9 @@ static int vds_usb_audio_control(struct vds_usb_device *dev, struct urb *urb,
 	if (selector == UAC_FU_CTRL_VOLUME &&
 	    urb->transfer_buffer_length >= sizeof(__le16)) {
 		memcpy(&volume, urb->transfer_buffer, sizeof(volume));
-		dev->audio_volume[feature_index] = (s16)le16_to_cpu(volume);
+		dev->audio_volume[feature_index] =
+			clamp_t(s16, (s16)le16_to_cpu(volume),
+				VDS_USB_SPK_VOLUME_MIN, VDS_USB_SPK_VOLUME_MAX);
 		urb->actual_length = sizeof(volume);
 		spin_unlock_irqrestore(&dev->lock, flags);
 		return 0;

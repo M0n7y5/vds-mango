@@ -52,7 +52,8 @@ static inline int
 vds_controller_audio_feature_index(const struct vds_controller_profile *profile,
 				   u8 entity_id)
 {
-	if (entity_id == profile->speaker_feature_unit)
+	if (profile->speaker_feature_unit != VDS_CONTROLLER_NO_AUDIO_FEATURE &&
+	    entity_id == profile->speaker_feature_unit)
 		return VDS_CONTROLLER_AUDIO_FEATURE_SPEAKER;
 	if (profile->mic_feature_unit != VDS_CONTROLLER_NO_AUDIO_FEATURE &&
 	    entity_id == profile->mic_feature_unit)

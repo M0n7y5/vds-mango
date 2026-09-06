@@ -7,7 +7,9 @@
 !/*.conf
 !/*.in
 !/*.json
-!/*.md
+!/README-LINUX.md
+!/README-WINDOWS.md
+!/README.md
 !/*.ps1
 !/*.rules
 !/*.sh
@@ -61,3 +63,7 @@
 !/src/**/*.hh
 !/src/**/*.hpp
 !/src/**/*.hxx
+
+!/tests/
+!/tests/*.cc
+!/tests/*.hh

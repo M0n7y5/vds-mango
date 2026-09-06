@@ -26,6 +26,12 @@ constexpr const char *kDbusPropertiesInterface =
     "org.freedesktop.DBus.Properties";
 constexpr const char *kDbusUnknownPropertyError =
     "org.freedesktop.DBus.Error.UnknownProperty";
+/*
+ * libdbus defaults to 25 s, which would stall the single-threaded event loop
+ * for that long when bluetoothd is wedged.
+ */
+constexpr int kBluezDisconnectTimeoutMs = 500;
+constexpr int kBluezQueryTimeoutMs = 2000;
 
 struct DBusConnectionDeleter {
   void operator()(DBusConnection *connection) const {
@@ -134,10 +140,10 @@ DBusConnectionPtr open_system_bus() {
 }
 
 DBusMessagePtr call_dbus_method(DBusConnection *connection, DBusMessage *call,
-                                const char *context) {
+                                const char *context, int timeout_ms) {
   DBusErrorGuard error;
   DBusMessage *reply = ::dbus_connection_send_with_reply_and_block(
-      connection, call, DBUS_TIMEOUT_USE_DEFAULT, error.get());
+      connection, call, timeout_ms, error.get());
   if (reply == nullptr) {
     throw std::runtime_error(std::string(context) + ": " + error.message());
   }
@@ -249,7 +255,8 @@ std::optional<std::string> find_device_path(DBusConnection *connection,
   }
 
   DBusMessagePtr reply =
-      call_dbus_method(connection, call.get(), "failed to query BlueZ objects");
+      call_dbus_method(connection, call.get(),
+                       "failed to query BlueZ objects", kBluezQueryTimeoutMs);
   DBusMessageIter root;
   if (!::dbus_message_iter_init(reply.get(), &root)) {
     return std::nullopt;
@@ -322,7 +329,7 @@ get_device_string_property(DBusConnection *connection, const std::string &path,
 
   DBusErrorGuard error;
   DBusMessage *raw_reply = ::dbus_connection_send_with_reply_and_block(
-      connection, call.get(), DBUS_TIMEOUT_USE_DEFAULT, error.get());
+      connection, call.get(), kBluezQueryTimeoutMs, error.get());
   if (raw_reply == nullptr) {
     if (error.has_name(kDbusUnknownPropertyError)) {
       return std::nullopt;
@@ -362,8 +369,9 @@ std::vector<ControllerTarget> list_bluez_controller_targets() {
     throw std::runtime_error("failed to allocate BlueZ D-Bus method call");
   }
 
-  DBusMessagePtr reply = call_dbus_method(connection.get(), call.get(),
-                                          "failed to query BlueZ objects");
+  DBusMessagePtr reply =
+      call_dbus_method(connection.get(), call.get(),
+                       "failed to query BlueZ objects", kBluezQueryTimeoutMs);
   DBusMessageIter root;
   if (!::dbus_message_iter_init(reply.get(), &root)) {
     return {};
@@ -430,7 +438,8 @@ bool disconnect_bluez_device(const std::string &address) {
     throw std::runtime_error("failed to allocate BlueZ disconnect call");
   }
   (void)call_dbus_method(connection.get(), call.get(),
-                         "failed to disconnect BlueZ device");
+                         "failed to disconnect BlueZ device",
+                         kBluezDisconnectTimeoutMs);
   return true;
 }
 

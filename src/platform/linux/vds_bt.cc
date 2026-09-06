@@ -52,6 +52,14 @@ std::string psm_error(std::uint16_t psm, int error) {
   return "Bluetooth L2CAP PSM " + psm_name(psm) + ": " + std::strerror(error);
 }
 
+void write_bt_packet(int fd, std::span<const std::uint8_t> packet) {
+  try {
+    write_full(fd, packet, "Bluetooth L2CAP", kBtWritePollTimeoutMs);
+  } catch (const std::runtime_error &error) {
+    throw BluetoothLinkError(error.what());
+  }
+}
+
 bool try_write_packet(int fd, std::span<const std::uint8_t> bytes) {
   while (true) {
     const ssize_t written =
@@ -66,10 +74,10 @@ bool try_write_packet(int fd, std::span<const std::uint8_t> bytes) {
       if (errno == EAGAIN || errno == EWOULDBLOCK) {
         return false;
       }
-      throw std::runtime_error("Bluetooth L2CAP write failed: " +
+      throw BluetoothLinkError("Bluetooth L2CAP write failed: " +
                                std::string(std::strerror(errno)));
     }
-    throw std::runtime_error("Bluetooth L2CAP short packet write");
+    throw BluetoothLinkError("Bluetooth L2CAP short packet write");
   }
 }
 
@@ -81,14 +89,14 @@ int open_l2cap_socket() {
     if (fd >= 0) {
       vds::UniqueFd unique_fd(fd);
       if (::fcntl(unique_fd.get(), F_SETFD, FD_CLOEXEC) < 0) {
-        throw std::runtime_error("failed to set socket close-on-exec: " +
+        throw BluetoothLinkError("failed to set socket close-on-exec: " +
                                  std::string(std::strerror(errno)));
       }
       return unique_fd.release();
     }
   }
   if (fd < 0) {
-    throw std::runtime_error("failed to open Bluetooth L2CAP socket: " +
+    throw BluetoothLinkError("failed to open Bluetooth L2CAP socket: " +
                              std::string(std::strerror(errno)));
   }
   return fd;
@@ -106,7 +114,7 @@ void fill_l2cap_sockaddr(sockaddr_l2 &sockaddr, std::uint16_t psm,
 std::string bluetooth_address_string(const bdaddr_t &address) {
   char buffer[18]{};
   if (::ba2str(&address, buffer) < 0) {
-    throw std::runtime_error("failed to format Bluetooth address");
+    throw BluetoothLinkError("failed to format Bluetooth address");
   }
   std::string text = buffer;
   std::transform(text.begin(), text.end(), text.begin(), [](char ch) {
@@ -122,7 +130,7 @@ UniqueFd listen_l2cap_psm(std::uint16_t psm) {
   const int reuse = 1;
   if (::setsockopt(fd.get(), SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) <
       0) {
-    throw std::runtime_error("failed to set " + psm_name(psm) +
+    throw BluetoothLinkError("failed to set " + psm_name(psm) +
                              " listener reuse: " + std::strerror(errno));
   }
 
@@ -132,12 +140,12 @@ UniqueFd listen_l2cap_psm(std::uint16_t psm) {
   if (::bind(fd.get(), reinterpret_cast<const struct sockaddr *>(&sockaddr),
              sizeof(sockaddr)) < 0) {
     const int error = errno;
-    throw std::runtime_error("failed to bind incoming " +
+    throw BluetoothLinkError("failed to bind incoming " +
                              psm_error(psm, error));
   }
   if (::listen(fd.get(), 1) < 0) {
     const int error = errno;
-    throw std::runtime_error("failed to listen on incoming " +
+    throw BluetoothLinkError("failed to listen on incoming " +
                              psm_error(psm, error));
   }
   return fd;
@@ -154,7 +162,7 @@ std::optional<BtAcceptedChannel> accept_l2cap_psm(int listener_fd,
     if (error == EAGAIN || error == EWOULDBLOCK || error == EINTR) {
       return {};
     }
-    throw std::runtime_error("failed to accept incoming " +
+    throw BluetoothLinkError("failed to accept incoming " +
                              psm_error(psm, error));
   }
 
@@ -162,10 +170,14 @@ std::optional<BtAcceptedChannel> accept_l2cap_psm(int listener_fd,
     return {};
   }
   if (::fcntl(fd.get(), F_SETFD, FD_CLOEXEC) < 0) {
-    throw std::runtime_error("failed to set accepted " + psm_name(psm) +
+    throw BluetoothLinkError("failed to set accepted " + psm_name(psm) +
                              " close-on-exec: " + std::strerror(errno));
   }
-  set_nonblocking(fd.get(), "socket");
+  try {
+    set_nonblocking(fd.get(), "socket");
+  } catch (const std::runtime_error &error) {
+    throw BluetoothLinkError(error.what());
+  }
   return BtAcceptedChannel{
       .address = bluetooth_address_string(peer.l2_bdaddr),
       .fd = std::move(fd),
@@ -223,7 +235,7 @@ void BtL2capBackend::send_output_report(std::span<const std::uint8_t> report) {
     return;
   }
   const auto packet = hidp_output_packet(report);
-  write_full(interrupt_fd_, packet, "Bluetooth L2CAP", kBtWritePollTimeoutMs);
+  write_bt_packet(interrupt_fd_, packet);
 }
 
 bool BtL2capBackend::try_send_output_report(
@@ -240,17 +252,27 @@ void BtL2capBackend::send_feature_get(std::uint8_t report_id) {
     return;
   }
   const auto packet = feature_get_packet(report_id);
-  write_full(control_fd_, packet, "Bluetooth L2CAP", kBtWritePollTimeoutMs);
+  write_bt_packet(control_fd_, packet);
 }
 
-void BtL2capBackend::send_feature_set(std::span<const std::uint8_t> report) {
+bool BtL2capBackend::try_send_feature_get(std::uint8_t report_id) {
   if (control_fd_ < 0) {
-    return;
+    return false;
+  }
+  const auto packet = feature_get_packet(report_id);
+  return try_write_packet(control_fd_, packet);
+}
+
+bool BtL2capBackend::try_send_feature_set(
+    std::span<const std::uint8_t> report) {
+  if (control_fd_ < 0) {
+    return false;
   }
   const auto packet = feature_set_packet(report);
-  if (!packet.empty()) {
-    write_full(control_fd_, packet, "Bluetooth L2CAP", kBtWritePollTimeoutMs);
+  if (packet.empty()) {
+    return true;
   }
+  return try_write_packet(control_fd_, packet);
 }
 
 std::optional<std::vector<std::uint8_t>> BtL2capBackend::read_feature_report() {
@@ -260,11 +282,11 @@ std::optional<std::vector<std::uint8_t>> BtL2capBackend::read_feature_report() {
     if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
       return std::nullopt;
     }
-    throw std::runtime_error("Bluetooth L2CAP control read failed: " +
+    throw BluetoothLinkError("Bluetooth L2CAP control read failed: " +
                              std::string(std::strerror(errno)));
   }
   if (got == 0) {
-    throw std::runtime_error("Bluetooth L2CAP control channel closed");
+    throw BluetoothLinkError("Bluetooth L2CAP control channel closed");
   }
   return bt_feature_to_usb_feature_reply(
       std::span(buffer.data(), static_cast<std::size_t>(got)));
@@ -278,11 +300,11 @@ BtL2capBackend::read_interrupt_packet() {
     if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
       return std::nullopt;
     }
-    throw std::runtime_error("Bluetooth L2CAP read failed: " +
+    throw BluetoothLinkError("Bluetooth L2CAP read failed: " +
                              std::string(std::strerror(errno)));
   }
   if (got == 0) {
-    throw std::runtime_error("Bluetooth L2CAP interrupt channel closed");
+    throw BluetoothLinkError("Bluetooth L2CAP interrupt channel closed");
   }
   return std::vector<std::uint8_t>(
       buffer.begin(), buffer.begin() + static_cast<std::ptrdiff_t>(got));

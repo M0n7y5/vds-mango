@@ -1029,12 +1029,19 @@ static int vds_open(struct inode *inode, struct file *file)
 	}
 	dev->opened = true;
 	spin_unlock_irqrestore(&dev->lock, flags);
+	/*
+	 * Pin the hcd (and the vds_hcd_dev embedded in hcd_priv) across the
+	 * open file: fops.owner blocks rmmod but not sysfs unbind, which
+	 * would free this device under us via vds_hcd_remove().
+	 */
+	usb_get_hcd(dev->hcd);
 	return 0;
 }
 
 static int vds_release(struct inode *inode, struct file *file)
 {
 	struct vds_hcd_dev *dev = vds_from_file(file);
+	struct usb_hcd *hcd = dev->hcd;
 	unsigned long flags;
 	bool disconnect;
 
@@ -1047,6 +1054,8 @@ static int vds_release(struct inode *inode, struct file *file)
 
 	if (disconnect)
 		vds_set_connection(dev, false);
+	/* May free dev, so it must be the last touch. */
+	usb_put_hcd(hcd);
 	return 0;
 }
 
@@ -1058,6 +1067,7 @@ static const struct file_operations vds_fops = {
 	.write = vds_write,
 	.poll = vds_poll,
 	.unlocked_ioctl = vds_ioctl,
+	.compat_ioctl = compat_ptr_ioctl,
 	.llseek = noop_llseek,
 };
 
