@@ -40,14 +40,18 @@ their addresses.
 
 ```sh
 vdsctl list-targets
-vdsctl attach aa:bb:cc:dd:ee:01 --profile ds5 --ports 0 # Connect as DualSense
-vdsctl attach aa:bb:cc:dd:ee:02 --profile dse --ports 1 # Connect as DualSense Edge
+vdsctl attach aa:bb:cc:dd:ee:01 --profile ds5 --ports 0 # Register as DualSense (press PS to connect)
+vdsctl attach aa:bb:cc:dd:ee:02 --profile dse --ports 1 # Register as DualSense Edge
 vdsctl detach aa:bb:cc:dd:ee:02 # Detach aa:bb:cc:dd:ee:02
 vdsctl list # Show registered controllers
 ```
 
 Omit `--ports` or pass `--ports ""` to allow all configured ports. Omit
 `--profile` or pass `--profile ""` to use the physical controller profile.
+
+`vdsctl attach` on an address that is already registered updates its profile
+and ports. `vdsctl list` shows each registered controller with its connection
+state, the virtual device path while connected, and the last connection error.
 
 > [!TIP]
 >

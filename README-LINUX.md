@@ -36,16 +36,97 @@ specification: DualSense HID IN/OUT use 4 ms intervals, while DualSense Edge HID
 IN uses 1 ms and HID OUT uses 4 ms. vDS uses the HID IN interval to pace virtual
 USB input URB completion.
 
-## Dependencies
+## Quick start (packages)
 
-### Runtime Dependencies
+Install kernel headers for the running kernel first, then the package:
+
+```sh
+# Debian
+sudo apt install linux-headers-$(uname -r)
+sudo apt install ./vds_<version>_<arch>.deb
+
+# Arch
+sudo pacman -S linux-headers
+sudo pacman -U vds-<version>-<arch>.pkg.tar.zst
+```
+
+Without matching headers the install stops and prints the header package to
+install. The package builds `vds_hcd` through DKMS, installs the udev rule,
+creates the `vds` group, and enables and starts `vdsd.service`.
+
+1. Give vDS the Bluetooth HID channels. Bluetooth keyboards and mice stop
+   working while the BlueZ input plugin is disabled:
+
+```sh
+sudo /usr/share/vds/override-bluetoothd.sh disable-input --restart
+```
+
+The script prints the effective `bluetooth.service` ExecStart when it is done.
+`enable-input --restart` reverts it.
+
+2. Pair and trust the controller. Hold Create and PS until the light bar blinks
+   rapidly, then in `bluetoothctl`:
+
+```text
+pair XX:XX:XX:XX:XX:XX
+trust XX:XX:XX:XX:XX:XX
+```
+
+Both steps are required: an untrusted controller will not be allowed to
+reconnect on its own.
+
+3. Use `vdsctl` without `sudo`:
+
+```sh
+sudo usermod -aG vds $USER
+```
+
+Log out and back in so the new group membership applies.
+
+4. Register the controller, then connect it:
+
+```sh
+vdsctl list-targets
+vdsctl attach XX:XX:XX:XX:XX:XX
+```
+
+`attach` registers the address, it does not connect. Press the PS button on the
+controller; the physical pad initiates the Bluetooth connection.
+
+5. Check the result:
+
+```sh
+vdsctl list
+```
+
+`connected` reports whether the pad is live, `path` is the virtual device
+(`/dev/vds0`..`/dev/vds3`) once connected, and `error` carries the last connect
+failure.
+
+6. Set the `pro-audio` card profile as described in
+   [Audio Setup](#audio-setup), then install the shipped WirePlumber rule:
+
+```sh
+mkdir -p ~/.config/wireplumber/wireplumber.conf.d
+cp /usr/share/doc/vds/examples/99-vds-dualsense-wireplumber.conf \
+  ~/.config/wireplumber/wireplumber.conf.d/
+systemctl --user restart pipewire pipewire-pulse wireplumber
+```
+
+The daemon log is `/var/log/vdsd.log`.
+
+## Build from source
+
+### Dependencies
+
+#### Runtime Dependencies
 
 - `libopus` (Bluetooth audio encoding)
 - `libudev` (virtual device discovery)
 - `libdbus-1` (BlueZ device metadata)
 - `libbluetooth` (Bluetooth address and L2CAP helpers)
 
-### Build Dependencies
+#### Build Dependencies
 
 - `gnu99` compiler toolchain compatible with the target kernel build
 - `git` (for versioning)
@@ -74,7 +155,7 @@ Install the header package matching your running kernel separately. If your
 kernel was built with the LLVM toolchain, install the matching LLVM toolchain
 instead of relying only on the default GNU toolchain.
 
-## Kernel Module Install
+### Kernel Module Install
 
 Build the kernel module locally:
 
@@ -102,7 +183,7 @@ override the number of virtual controller ports:
 sudo modprobe vds_hcd max_port=2 # must be in the range `1..4`
 ```
 
-## Userspace Install
+### Userspace Install
 
 Build the daemon and CLI:
 
@@ -143,6 +224,10 @@ installation. To start it without rebooting, run:
 sudo systemctl restart vdsd.service
 ```
 
+A source install does not create the `vds` group, so `vdsctl` needs `sudo`
+unless you create the group yourself (`sudo groupadd --system vds`) and restart
+`vdsd`.
+
 ## Initial Bluetooth Pairing
 
 > [!IMPORTANT]
@@ -164,6 +249,9 @@ sudo systemctl restart vdsd.service
 > sudo ./override-bluetoothd.sh disable-input --restart
 > sudo ./override-bluetoothd.sh enable-input --restart
 > ```
+>
+> Packages install the same script as
+> `/usr/share/vds/override-bluetoothd.sh`.
 
 Pair each physical controller once before registering it with `vdsctl`. Start
 `bluetoothctl`, put the controller in Bluetooth pairing mode by holding Create
@@ -219,6 +307,10 @@ mkdir -p ~/.config/wireplumber/wireplumber.conf.d
 cp 99-vds-dualsense-wireplumber.conf ~/.config/wireplumber/wireplumber.conf.d/
 ```
 
+Packages ship this file as
+`/usr/share/doc/vds/examples/99-vds-dualsense-wireplumber.conf` and never
+install it into a user configuration directory.
+
 Restart the user audio services after changing this file:
 
 ```sh
@@ -238,6 +330,9 @@ sudo cp 99-vds-dualsense-udev.rules /etc/udev/rules.d/
 sudo udevadm control --reload-rules
 sudo udevadm trigger --subsystem-match=input
 ```
+
+Packages install this rule and reload udev already, so this step is only for
+source checkouts.
 
 ## Testing
 
@@ -260,3 +355,21 @@ Check the virtual USB audio endpoint with standard ALSA tools:
 aplay -l
 speaker-test -D hw:<card-number>,<device-number> -c 4 -r 48000 -F S16_LE -t sine
 ```
+
+## Runtime notes
+
+- The control socket is `/run/vdsd.sock`, owned `root:vds` with mode `0660`
+  when the `vds` group exists. Group members run `vdsctl` without `sudo`, and
+  `sudo vdsctl` always works.
+- `vdsctl list` and `vdsctl list-targets` print a table when stdout is a
+  terminal. Pass `--json`, or pipe the output, to get the JSONL form that
+  scripts can parse.
+- `vdsctl` exits 0 on success and 1 on failure; daemon errors go to stderr.
+- `vdsctl trace status` reports the currently enabled trace scopes without
+  changing them.
+- `SIGHUP` reopens `/var/log/vdsd.log` for logrotate and reloads
+  `/var/lib/vds/vdsd.db`, so a HUP also picks up database edits.
+- `vdsctl attach` on an already registered address updates its profile and
+  ports instead of failing. A profile change reconnects the controller.
+- `vdsd --help` lists the runtime prerequisites, the signal behavior, and the
+  database and log paths.
