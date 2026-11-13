@@ -15,6 +15,7 @@
 
 !/data/
 !/data/*.conf
+!/data/*.desktop
 !/data/*.in
 !/data/*.rules
 

@@ -139,6 +139,17 @@ systemctl --user restart pipewire pipewire-pulse wireplumber
 
 The daemon log is `/var/log/vdsd.log`.
 
+## Graphical app
+
+`vds-mango` (vDS Mango in the application menu) manages controllers without the
+command line. It lists the registered controllers with their connection state,
+adds paired controllers, changes which controller model games see and which
+virtual ports a controller may use, removes controllers, and toggles trace
+logging.
+
+It talks to `vdsd` over `/run/vdsd.sock`, so your user must be in the `vds`
+group, exactly as for `vdsctl`.
+
 ## Controller configuration
 
 `vdsctl` is a control client. Every operation is sent through the daemon control
@@ -187,6 +198,7 @@ active device path.
 - `libudev` (virtual device discovery)
 - `libdbus-1` (BlueZ device metadata)
 - `libbluetooth` (Bluetooth address and L2CAP helpers)
+- `qt6-base` (graphical app)
 
 #### Build Dependencies
 
@@ -196,12 +208,12 @@ active device path.
 - Target Linux kernel headers
 - `dkms` (for installing and rebuilding the kernel module automatically)
 - `c++20` compiler toolchain for userspace
-- `cmake` (3.12 or newer)
+- `cmake` (3.16 or newer)
 - `pkg-config`
 
 ```sh
 sudo pacman -S git base-devel dkms cmake pkgconf
-sudo pacman -S opus systemd dbus bluez-libs
+sudo pacman -S opus systemd dbus bluez-libs qt6-base
 ```
 
 Install the header package matching your running kernel separately. If your
@@ -257,6 +269,7 @@ The installed tools are:
 ```sh
 /usr/local/bin/vdsd
 /usr/local/bin/vdsctl
+/usr/local/bin/vds-mango
 ```
 
 To install and remove the `vdsd` systemd service with the userspace tools,
