@@ -186,6 +186,7 @@ substitute_template "${script_dir}/vds-mango.install.in" "${package_root}/.INSTA
 	mtree_tmp=$(mktemp)
 	trap 'rm -f "$mtree_tmp"' EXIT
 	bsdtar --format=mtree \
+		--uid 0 --gid 0 --uname root --gname root \
 		--options='!all,use-set,type,uid,gid,mode,time,size,md5,sha256,link' \
 		-cf - \
 		--exclude .BUILDINFO \
@@ -195,7 +196,8 @@ substitute_template "${script_dir}/vds-mango.install.in" "${package_root}/.INSTA
 		. | gzip -c >"$mtree_tmp"
 	mv "$mtree_tmp" .MTREE
 	trap - EXIT
-		bsdtar -cf - .PKGINFO .BUILDINFO .INSTALL .MTREE etc usr |
+		bsdtar --uid 0 --gid 0 --uname root --gname root \
+			-cf - .PKGINFO .BUILDINFO .INSTALL .MTREE etc usr |
 			zstd -T0 -q -c >"$package_path"
 	)
 

@@ -17,6 +17,7 @@ depend = glibc
 depend = kmod
 depend = make
 depend = opus
+depend = qt6-base
 depend = systemd-libs
 optdepend = base-devel
 optdepend = clang

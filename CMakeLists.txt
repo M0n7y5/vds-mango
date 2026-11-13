@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.12)
+cmake_minimum_required(VERSION 3.16)
 
 project(vds-mango LANGUAGES CXX)
 
@@ -12,6 +12,7 @@ pkg_check_modules(BLUEZ REQUIRED IMPORTED_TARGET bluez)
 pkg_check_modules(DBUS REQUIRED IMPORTED_TARGET dbus-1)
 pkg_check_modules(OPUS REQUIRED IMPORTED_TARGET opus)
 pkg_check_modules(UDEV REQUIRED IMPORTED_TARGET libudev)
+find_package(Qt6 REQUIRED COMPONENTS Widgets Network)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -30,8 +31,7 @@ add_compile_options(-Wall -Wextra -Wshadow -Wformat=2
                     -Werror=format-security -fstack-protector-strong -fPIE
                     $<$<NOT:$<CONFIG:Debug>>:-U_FORTIFY_SOURCE>
                     $<$<NOT:$<CONFIG:Debug>>:-D_FORTIFY_SOURCE=3>)
-# add_link_options() needs CMake 3.13; this file declares 3.12.
-string(APPEND CMAKE_EXE_LINKER_FLAGS " -Wl,-z,relro -Wl,-z,now -pie")
+add_link_options(-Wl,-z,relro -Wl,-z,now -pie)
 
 set(VDS_GENERATED_DIR ${CMAKE_CURRENT_BINARY_DIR}/generated)
 set(VDS_BUILD_INFO_HEADER ${VDS_GENERATED_DIR}/vds_build_info.hh)
@@ -81,6 +81,11 @@ target_include_directories(
                      ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(vdsd_common PUBLIC jsonl vds_config vds_log)
 
+add_library(vds_gui_protocol OBJECT src/gui/control_protocol.cc)
+target_include_directories(vds_gui_protocol
+                           PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src/gui)
+target_link_libraries(vds_gui_protocol PUBLIC vds_config Qt6::Core)
+
 if(BUILD_TESTS)
   enable_testing()
   add_library(vds_test_support OBJECT tests/vds_check.cc)
@@ -123,6 +128,20 @@ if(BUILD_TESTS)
                                                        vds_protocol
                                                        PkgConfig::OPUS)
   add_test(NAME protocol_bt_input COMMAND test_protocol_bt_input
+           WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+
+  add_executable(test_gui_protocol tests/test_gui_protocol.cc)
+  target_link_libraries(
+    test_gui_protocol
+    PRIVATE vds_test_support
+            jsonl
+            vds_common
+            vds_config
+            vds_gui_protocol
+            vds_log
+            vdsd_common
+            Qt6::Core)
+  add_test(NAME gui_protocol COMMAND test_gui_protocol
            WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 endif()
 
@@ -167,8 +186,26 @@ target_link_libraries(
           vdsctl_common
           vds_udev)
 
+add_executable(
+  vds-mango
+  src/gui/vds_mango.cc src/gui/control_client.cc src/gui/controller_dialog.cc
+  src/gui/controller_model.cc src/gui/main_window.cc)
+add_dependencies(vds-mango vds_build_info_header)
+target_include_directories(vds-mango PRIVATE ${VDS_GENERATED_DIR})
+target_link_libraries(
+  vds-mango
+  PRIVATE jsonl
+          vds_common
+          vds_config
+          vds_gui_protocol
+          Qt6::Network
+          Qt6::Widgets)
+
 set(VDS_INSTALLED_VDSD "${CMAKE_INSTALL_FULL_BINDIR}/vdsd")
 set(VDS_INSTALLED_VDSCTL "${CMAKE_INSTALL_FULL_BINDIR}/vdsctl")
+set(VDS_INSTALLED_GUI "${CMAKE_INSTALL_FULL_BINDIR}/vds-mango")
+set(VDS_INSTALLED_DESKTOP_ENTRY
+    "${CMAKE_INSTALL_FULL_DATADIR}/applications/vds-mango.desktop")
 set(VDS_INSTALL_SERVICE_SCRIPT
     ${CMAKE_CURRENT_SOURCE_DIR}/scripts/install-service.sh)
 set(VDS_UNINSTALL_SERVICE_SCRIPT
@@ -208,7 +245,10 @@ string(
 string(APPEND VDS_INSTALL_SERVICE_CODE "  endif()\n")
 string(APPEND VDS_INSTALL_SERVICE_CODE "endif()\n")
 
-install(TARGETS vdsd vdsctl RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(TARGETS vdsd vdsctl vds-mango
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(FILES data/vds-mango.desktop
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
 
 if(INSTALL_SERVICE)
   install(FILES ${VDS_SYSTEMD_SERVICE_FILE}
@@ -218,10 +258,13 @@ if(INSTALL_SERVICE)
     uninstall
     COMMAND ${VDS_UNINSTALL_SERVICE_SCRIPT} --stop --disable --remove-file
             ${VDS_INSTALLED_SYSTEMD_SERVICE}
-    COMMAND ${CMAKE_COMMAND} -E rm -f ${VDS_INSTALLED_VDSD}
-            ${VDS_INSTALLED_VDSCTL})
+    COMMAND
+      ${CMAKE_COMMAND} -E rm -f ${VDS_INSTALLED_VDSD} ${VDS_INSTALLED_VDSCTL}
+      ${VDS_INSTALLED_GUI} ${VDS_INSTALLED_DESKTOP_ENTRY})
 else()
   add_custom_target(
-    uninstall COMMAND ${CMAKE_COMMAND} -E rm -f ${VDS_INSTALLED_VDSD}
-                      ${VDS_INSTALLED_VDSCTL})
+    uninstall
+    COMMAND
+      ${CMAKE_COMMAND} -E rm -f ${VDS_INSTALLED_VDSD} ${VDS_INSTALLED_VDSCTL}
+      ${VDS_INSTALLED_GUI} ${VDS_INSTALLED_DESKTOP_ENTRY})
 endif()
