@@ -28,7 +28,7 @@ std::string vdsd_usage(std::string_view version, std::string_view build_year,
   const VdsdCommonOptions defaults = default_vdsd_common_options();
   std::string text = "vdsd (";
   text += version;
-  text += "): vDS daemon - Copyright (C) ";
+  text += "): vDS Mango daemon - Copyright (C) ";
   text += build_year;
   text += " Jihong Min\n"
           "usage:\n"

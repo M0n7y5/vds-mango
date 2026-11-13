@@ -1,5 +1,5 @@
 [Unit]
-Description=vDS userspace daemon
+Description=vDS Mango userspace daemon
 After=bluetooth.service
 Wants=bluetooth.service
 

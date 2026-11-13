@@ -1,13 +1,14 @@
-pkgname = vds
-pkgbase = vds
+pkgname = vds-mango
+pkgbase = vds-mango
 xdata = pkgtype=pkg
 pkgver = @PKGVER@-@PKGREL@
 pkgdesc = Virtual DualSense Bluetooth-to-USB bridge
 builddate = @BUILDDATE@
-packager = Jihong Min <hurryman2212@gmail.com>
+packager = M0n7y5 <17201053+M0n7y5@users.noreply.github.com>
 size = @SIZE@
 arch = @ARCH@
 license = MIT
+conflict = vds
 depend = bluez-libs
 depend = dbus
 depend = dkms

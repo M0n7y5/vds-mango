@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.12)
 
-project(vds LANGUAGES CXX)
+project(vds-mango LANGUAGES CXX)
 
 option(INSTALL_SERVICE "Register vdsd as a system service during install" OFF)
 option(BUILD_TESTS "Build unit tests" OFF)

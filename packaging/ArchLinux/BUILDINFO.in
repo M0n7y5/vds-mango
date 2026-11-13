@@ -1,11 +1,11 @@
 format = 2
-pkgname = vds
-pkgbase = vds
+pkgname = vds-mango
+pkgbase = vds-mango
 pkgver = @PKGVER@-@PKGREL@
 pkgarch = @ARCH@
 pkgbuild_sha256sum = SKIP
-packager = Jihong Min <hurryman2212@gmail.com>
+packager = M0n7y5 <17201053+M0n7y5@users.noreply.github.com>
 builddate = @BUILDDATE@
 builddir = @BUILDROOT@
 startdir = @REPOROOT@
-buildtool = vds packaging/ArchLinux/build-arch.sh
+buildtool = vds-mango packaging/ArchLinux/build-arch.sh
