@@ -2,23 +2,8 @@ if(NOT DEFINED VDS_SOURCE_DIR OR NOT DEFINED VDS_BUILD_INFO_HEADER)
   message(FATAL_ERROR "missing vDS build info arguments")
 endif()
 
-if(WIN32)
-  set(VDS_VERSION_SCRIPT "${VDS_SOURCE_DIR}/generate_version.ps1")
-  find_program(VDS_VERSION_SCRIPT_SHELL pwsh powershell)
-  if(VDS_VERSION_SCRIPT_SHELL)
-    set(VDS_VERSION_COMMAND
-        "${VDS_VERSION_SCRIPT_SHELL}" -NoProfile -ExecutionPolicy Bypass -File
-        "${VDS_VERSION_SCRIPT}" -Type Tool)
-  else()
-    set(VDS_VERSION_COMMAND "${VDS_VERSION_SCRIPT}" -Type Tool)
-  endif()
-else()
-  set(VDS_VERSION_SCRIPT "${VDS_SOURCE_DIR}/generate-version.sh")
-  set(VDS_VERSION_COMMAND "${VDS_VERSION_SCRIPT}")
-endif()
-
 execute_process(
-  COMMAND ${VDS_VERSION_COMMAND}
+  COMMAND "${VDS_SOURCE_DIR}/scripts/generate-version.sh"
   OUTPUT_VARIABLE VDS_VERSION
   ERROR_QUIET OUTPUT_STRIP_TRAILING_WHITESPACE)
 if(VDS_VERSION STREQUAL "")

@@ -3,16 +3,15 @@ set -eu
 
 usage() {
 	cat <<'USAGE'
-Usage: ./generate-version.sh [--internal debian|arch]
-       ./generate-version.sh --package debian|arch --arch ARCH [--name NAME] [--pkgrel REL]
+Usage: ./generate-version.sh [--internal arch]
+       ./generate-version.sh --package arch --arch ARCH [--name NAME] [--pkgrel REL]
 
 Options:
   Default      Print the nearest X.X.X[-rcN] tag version.
   --internal   Print an internal package metadata version:
-               debian => Debian Version field without Debian revision.
                arch   => Arch pkgver field without pkgrel.
   --package    Print a package filename for the selected package format.
-  --name       Package name for --package. Defaults to this script's directory name.
+  --name       Package name for --package. Defaults to the repository directory name.
   --arch       Package architecture for --package.
   --pkgrel     Package release for --package. Omitted from filenames if unset.
   -h, --help   Show this help text.
@@ -25,7 +24,8 @@ script_dir=$(
 )
 mode=git
 package_format=""
-package_name=${script_dir##*/}
+package_name=${script_dir%/*}
+package_name=${package_name##*/}
 package_release=""
 package_arch=""
 version_tag_pattern='^[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*(-rc[0-9][0-9]*)?$'
@@ -38,7 +38,7 @@ while [ "$#" -gt 0 ]; do
 			exit 2
 		fi
 		case "$2" in
-		debian | arch)
+		arch)
 			mode=$2
 			;;
 		*)
@@ -194,41 +194,6 @@ has_dirty_suffix() {
 	esac
 }
 
-sanitize_debian_base() {
-	printf '%s' "$1" |
-		sed \
-			-e 's/^v//' \
-			-e 's/-rc/~rc/g' \
-			-e 's/[^A-Za-z0-9.+~]/./g'
-}
-
-debian_version() {
-	raw=$1
-	dirty=""
-	if has_dirty_suffix "$raw"; then
-		dirty=".dirty"
-	fi
-	raw=$(strip_dirty_suffix "$raw")
-
-	if printf '%s' "$raw" | grep -Eq '^.+-[0-9]+-g[0-9A-Fa-f]+$'; then
-		tag=${raw%-g*}
-		sha=${raw##*-g}
-		distance=${tag##*-}
-		tag=${tag%-"$distance"}
-		base=$(sanitize_debian_base "$tag")
-		printf '%s+%s.g%s%s\n' "$base" "$distance" "$sha" "$dirty"
-		return
-	fi
-
-	if printf '%s' "$raw" | grep -Eq '^[0-9A-Fa-f]{7,40}$|^unknown$'; then
-		printf '0.0.0+g%s%s\n' "$raw" "$dirty"
-		return
-	fi
-
-	base=$(sanitize_debian_base "$raw")
-	printf '%s%s\n' "$base" "$dirty"
-}
-
 sanitize_arch_base() {
 	printf '%s' "$1" |
 		sed \
@@ -276,11 +241,6 @@ package_filename() {
 	fi
 
 	case "$1" in
-	debian)
-		pkgver=$(debian_version "$2")
-		printf '%s_%s%s_%s.deb\n' \
-			"$package_name" "$pkgver" "$release_part" "$package_arch"
-		;;
 	arch)
 		pkgver=$(arch_version "$2")
 		printf '%s-%s%s-%s.pkg.tar.zst\n' \
@@ -303,9 +263,6 @@ fi
 case "$mode" in
 git)
 	printf '%s\n' "$raw_version"
-	;;
-debian)
-	debian_version "$raw_version"
 	;;
 arch)
 	arch_version "$raw_version"

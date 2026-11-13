@@ -242,35 +242,15 @@ std::string port_path_for_index(unsigned port) {
                              std::to_string(kMaxPortCount - 1) + ": " +
                              std::to_string(port));
   }
-#ifdef _WIN32
-  return R"(\\.\vds)" + std::to_string(port);
-#else
   return "/dev/vds" + std::to_string(port);
-#endif
 }
 
 std::optional<unsigned> port_index_from_path(std::string_view path) {
-#ifdef _WIN32
-  constexpr std::string_view dos_prefix = R"(\\.\vds)";
-  constexpr std::string_view nt_prefix = R"(\\?\vds)";
-  constexpr std::string_view short_prefix = "vds";
-  std::string_view port_text;
-  if (path.rfind(dos_prefix, 0) == 0) {
-    port_text = path.substr(dos_prefix.size());
-  } else if (path.rfind(nt_prefix, 0) == 0) {
-    port_text = path.substr(nt_prefix.size());
-  } else if (path.rfind(short_prefix, 0) == 0) {
-    port_text = path.substr(short_prefix.size());
-  } else {
-    return std::nullopt;
-  }
-#else
   constexpr std::string_view prefix = "/dev/vds";
   if (path.rfind(prefix, 0) != 0) {
     return std::nullopt;
   }
   const std::string_view port_text = path.substr(prefix.size());
-#endif
 
   if (!vds::is_decimal_number(port_text)) {
     return std::nullopt;

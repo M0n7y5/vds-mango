@@ -3,16 +3,8 @@
 #ifndef _UAPI_VDS_H
 #define _UAPI_VDS_H
 
-#ifdef _WIN32
-#include <stdint.h>
-typedef uint8_t __u8;
-typedef uint16_t __u16;
-typedef uint32_t __u32;
-typedef uint64_t __u64;
-#else
 #include <linux/ioctl.h>
 #include <linux/types.h>
-#endif
 
 #define VDS_IOC_MAGIC 'V'
 #define VDS_FRAME_MAX_PAYLOAD 4096
@@ -36,8 +28,6 @@ enum vds_frame_type {
 	VDS_FRAME_USB_HID_IN = 5,
 	VDS_FRAME_USB_FEATURE_REPLY = 6,
 	VDS_FRAME_USB_INTERFACE = 7,
-	VDS_FRAME_BT_CONTROL_PACKET = 8,
-	VDS_FRAME_BT_INTERRUPT_PACKET = 9,
 	VDS_FRAME_USB_AUDIO_IN = 10,
 };
 
@@ -91,13 +81,11 @@ struct vds_profile_config {
 	__u32 polling_rate_mode;
 };
 
-#ifndef _WIN32
 #define VDS_IOC_GET_STATUS _IOR(VDS_IOC_MAGIC, 0x01, struct vds_status)
 #define VDS_IOC_SET_PROFILE _IOW(VDS_IOC_MAGIC, 0x02, struct vds_profile_config)
 #define VDS_IOC_CONNECT _IO(VDS_IOC_MAGIC, 0x03)
 #define VDS_IOC_DISCONNECT _IO(VDS_IOC_MAGIC, 0x04)
 #define VDS_IOC_GET_DRIVER_INFO \
 	_IOR(VDS_IOC_MAGIC, 0x05, struct vds_driver_info)
-#endif
 
 #endif /* _UAPI_VDS_H */

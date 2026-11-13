@@ -3,18 +3,10 @@ name: Build all packages
 on:
   workflow_dispatch:
     inputs:
-      debian_revision:
-        description: Debian package revision
-        required: true
-        default: "1"
       arch_pkgrel:
         description: Arch Linux pkgrel
         required: true
         default: "1"
-      windows_pkgrel:
-        description: Windows package release suffix. Leave empty to omit it.
-        required: false
-        default: ""
       release_label:
         description: GitHub release label
         required: true
@@ -79,45 +71,6 @@ jobs:
         if: matrix.cxx == 'g++'
         run: make -C module
 
-  debian:
-    name: Debian package
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-
-      - name: Install build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            git \
-            build-essential \
-            dkms \
-            cmake \
-            pkg-config
-          sudo apt-get install -y \
-            libopus-dev \
-            libudev-dev \
-            libdbus-1-dev \
-            libbluetooth-dev
-
-      - name: Build Debian package
-        run: |
-          packaging/debian/build-deb.sh \
-            --revision "${{ inputs.debian_revision }}" \
-            --output-dir "$PWD/dist/debian"
-
-      - name: Upload Debian package
-        uses: actions/upload-artifact@v7
-        with:
-          name: debian-package
-          path: dist/debian/*.deb
-          if-no-files-found: error
-
   archlinux:
     name: Arch Linux package
     if: github.event_name == 'workflow_dispatch'
@@ -165,99 +118,6 @@ jobs:
           path: dist/ArchLinux/*.pkg.tar.zst
           if-no-files-found: error
 
-  windows:
-    name: Windows package
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: windows-latest
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-
-      - name: Prepare Windows build tools
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          $PSNativeCommandUseErrorActionPreference = $true
-
-          function Install-VdsWingetPackage {
-            param(
-              [Parameter(Mandatory = $true)]
-              [string]$PackageId
-            )
-
-            $PSNativeCommandUseErrorActionPreference = $false
-            $InstalledPackages = winget list `
-              --exact `
-              --id $PackageId `
-              --source winget `
-              --accept-source-agreements 2>&1 | Out-String
-            $AlreadyInstalled = $LASTEXITCODE -eq 0 -and
-              $InstalledPackages.Contains($PackageId)
-            $PSNativeCommandUseErrorActionPreference = $true
-
-            if ($AlreadyInstalled) {
-              return
-            }
-
-            winget install `
-              --exact `
-              --id $PackageId `
-              --source winget `
-              --silent `
-              --accept-package-agreements `
-              --accept-source-agreements
-          }
-
-          Install-VdsWingetPackage -PackageId Git.Git
-          Install-VdsWingetPackage -PackageId Kitware.CMake
-          Install-VdsWingetPackage -PackageId Microsoft.VCRedist.2015+.x64
-
-          $Vcpkg = Get-Command vcpkg.exe -ErrorAction SilentlyContinue
-          if ($Vcpkg) {
-            $VcpkgPath = $Vcpkg.Source
-          } else {
-            $VcpkgPath = "C:\vcpkg\vcpkg.exe"
-          }
-
-          $VcpkgRoot = Split-Path -Parent $VcpkgPath
-          "VDS_VCPKG_ROOT=$VcpkgRoot" | Out-File -FilePath $env:GITHUB_ENV -Append
-
-      - name: Install WiX
-        shell: pwsh
-        run: |
-          dotnet tool install --global wix --version 4.*
-          "$env:USERPROFILE\.dotnet\tools" | Out-File -FilePath $env:GITHUB_PATH -Append
-
-      - name: Build userspace tools
-        shell: pwsh
-        run: |
-          cmake -S . -B build\windows `
-            -DINSTALL_SERVICE=YES `
-            -DCMAKE_TOOLCHAIN_FILE="$env:VDS_VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake"
-          cmake --build build\windows --config Release --parallel
-
-      - name: Build Windows setup package
-        shell: pwsh
-        run: |
-          $Args = @{
-            ToolsDir = (Resolve-Path "build\windows\Release").Path
-            OutputDir = (Resolve-Path ".").Path + "\dist\windows"
-          }
-          if (![string]::IsNullOrWhiteSpace("${{ inputs.windows_pkgrel }}")) {
-            $Args.PkgRel = "${{ inputs.windows_pkgrel }}"
-          }
-          .\packaging\windows\build_installer.ps1 @Args
-
-      - name: Upload Windows setup package
-        uses: actions/upload-artifact@v7
-        with:
-          name: windows-package
-          path: dist/windows/*.exe
-          if-no-files-found: error
-
   release:
     name: GitHub Release
     if: github.event_name == 'workflow_dispatch'
@@ -265,9 +125,7 @@ jobs:
     permissions:
       contents: write
     needs:
-      - debian
       - archlinux
-      - windows
 
     steps:
       - name: Check out repository
@@ -278,7 +136,7 @@ jobs:
       - name: Resolve raw version
         id: version
         run: |
-          raw_version="$(./generate-version.sh)"
+          raw_version="$(./scripts/generate-version.sh)"
           echo "raw_version=${raw_version}" >> "$GITHUB_OUTPUT"
           echo "Raw version: ${raw_version}"
 

@@ -132,7 +132,7 @@ require_tool zstd
 arch=$(uname -m)
 version_args=(--internal arch)
 package_args=(--package arch --name "$package_name" --pkgrel "$pkgrel" --arch "$arch")
-pkgver=$("${repo_root}/generate-version.sh" "${version_args[@]}")
+pkgver=$("${repo_root}/scripts/generate-version.sh" "${version_args[@]}")
 dkms_version=$pkgver
 build_date=$(date +%s)
 build_dir="${build_root}/cmake"
@@ -140,7 +140,7 @@ stage_dir="${build_root}/stage"
 package_root="${build_root}/${package_name}-${pkgver}-${pkgrel}-${arch}"
 dkms_source_dir="${package_root}/usr/src/vds_hcd-${dkms_version}"
 output_dir=$(realpath -m "$output_dir")
-package_path="${output_dir}/$("${repo_root}/generate-version.sh" "${package_args[@]}")"
+package_path="${output_dir}/$("${repo_root}/scripts/generate-version.sh" "${package_args[@]}")"
 
 rm -rf "$build_dir" "$stage_dir" "$package_root"
 mkdir -p "$build_dir" "$stage_dir" "$package_root" "$output_dir"
@@ -156,15 +156,15 @@ cp -a "$stage_dir/." "$package_root/"
 
 install -Dm0644 "$build_dir/vdsd.service" \
 	"${package_root}/usr/lib/systemd/system/vdsd.service"
-install -Dm0644 "${repo_root}/99-vds-dualsense-udev.rules" \
+install -Dm0644 "${repo_root}/data/99-vds-dualsense-udev.rules" \
 	"${package_root}/usr/lib/udev/rules.d/99-vds-dualsense-udev.rules"
-install -Dm0755 "${repo_root}/override-bluetoothd.sh" \
+install -Dm0755 "${repo_root}/scripts/override-bluetoothd.sh" \
 	"${package_root}/usr/share/vds/override-bluetoothd.sh"
-install -Dm0755 "${repo_root}/install-service.sh" \
+install -Dm0755 "${repo_root}/scripts/install-service.sh" \
 	"${package_root}/usr/share/vds/install-service.sh"
-install -Dm0755 "${repo_root}/uninstall-service.sh" \
+install -Dm0755 "${repo_root}/scripts/uninstall-service.sh" \
 	"${package_root}/usr/share/vds/uninstall-service.sh"
-install -Dm0644 "${repo_root}/logrotate-vds.conf" \
+install -Dm0644 "${repo_root}/data/logrotate-vds.conf" \
 	"${package_root}/etc/logrotate.d/vds"
 
 install_dkms_sources "$dkms_source_dir"
@@ -175,7 +175,7 @@ install -Dm0644 "${repo_root}/README-LINUX.md" \
 	"${package_root}/usr/share/doc/vds/README-LINUX.md"
 install -Dm0644 "${repo_root}/LICENSE" \
 	"${package_root}/usr/share/licenses/vds/LICENSE"
-install -Dm0644 "${repo_root}/99-vds-dualsense-wireplumber.conf" \
+install -Dm0644 "${repo_root}/data/99-vds-dualsense-wireplumber.conf" \
 	"${package_root}/usr/share/doc/vds/examples/99-vds-dualsense-wireplumber.conf"
 
 installed_size=$(du -sb "$package_root" | awk '{print $1}')

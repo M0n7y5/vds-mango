@@ -13,7 +13,6 @@ namespace vds {
 
 bool is_decimal_number(std::string_view text);
 std::string hex_u8(std::uint8_t value);
-std::string hex_u16(std::uint16_t value);
 std::string hex_bytes(std::span<const std::uint8_t> bytes,
                       std::size_t max_bytes, char separator = ' ',
                       bool append_ellipsis = true);

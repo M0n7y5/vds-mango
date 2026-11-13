@@ -956,10 +956,6 @@ std::string frame_type_name(std::uint16_t type) {
     return "USB_FEATURE_REPLY";
   case VDS_FRAME_USB_INTERFACE:
     return "USB_INTERFACE";
-  case VDS_FRAME_BT_CONTROL_PACKET:
-    return "BT_CONTROL_PACKET";
-  case VDS_FRAME_BT_INTERRUPT_PACKET:
-    return "BT_INTERRUPT_PACKET";
   default:
     return "UNKNOWN";
   }

@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Jihong Min <hurryman2212@gmail.com>
 #pragma once
 
-#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <iosfwd>
@@ -56,25 +55,6 @@ struct VdsdControlPortBinding {
   std::string device_address;
 };
 
-enum class VdsdWorkerLaunchStatus {
-  Ready,
-  VirtualPortProviderUnavailable,
-  DeviceAddressReserved,
-  NoAvailablePort,
-};
-
-struct VdsdWorkerLaunchDecision {
-  VdsdWorkerLaunchStatus status = VdsdWorkerLaunchStatus::NoAvailablePort;
-  ControllerConfig config;
-  unsigned port = 0;
-  std::string device_address;
-};
-
-struct VdsdWorkerFailureBackoff {
-  std::string address;
-  std::chrono::steady_clock::time_point retry_after;
-};
-
 VdsdCommonOptions default_vdsd_common_options();
 std::string vdsd_usage(std::string_view version, std::string_view build_year,
                        std::string_view platform_options);
@@ -88,31 +68,9 @@ std::uint32_t parse_trace_scope(std::string_view scope);
 std::string trace_scope_name(std::uint32_t scope);
 std::string active_trace_name(std::uint32_t trace_flags);
 bool trace_enabled(std::uint32_t trace_flags, std::uint32_t target);
-bool remember_vdsd_warning(std::vector<std::string> &warnings,
-                           std::string_view key);
-void forget_vdsd_warning(std::vector<std::string> &warnings,
-                         std::string_view key);
-bool remember_vdsd_warning_state(std::vector<std::string> &warnings,
-                                 std::string_view key, std::string_view state);
-void forget_vdsd_warning_state(std::vector<std::string> &warnings,
-                               std::string_view key);
 std::vector<VdsdControlPortStatus> build_vdsd_control_port_statuses(
     std::span<const VdsdControlPortCandidate> candidates,
     std::span<const VdsdControlPortBinding> bindings);
-VdsdWorkerLaunchDecision select_vdsd_worker_launch_decision(
-    const ControllerConfig &config, std::span<const unsigned> available_ports,
-    std::span<const unsigned> reserved_ports, std::string_view device_address,
-    bool virtual_port_provider_available,
-    std::span<const std::string> reserved_device_addresses);
-bool vdsd_worker_config_is_stale(const ConfigDb &db, std::string_view address,
-                                 ControllerProfile profile, unsigned port,
-                                 bool port_enabled);
-void record_vdsd_worker_failure(
-    std::vector<VdsdWorkerFailureBackoff> &backoffs, std::string_view address,
-    std::chrono::steady_clock::time_point retry_after);
-bool consume_vdsd_worker_retry(std::vector<VdsdWorkerFailureBackoff> &backoffs,
-                               std::string_view address,
-                               std::chrono::steady_clock::time_point now);
 std::string handle_vdsd_control_command(
     std::string_view request, const std::string &db_path,
     std::span<const VdsdControlControllerStatus> controllers,

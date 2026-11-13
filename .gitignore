@@ -4,15 +4,8 @@
 
 !/CMakeLists.txt
 !/LICENSE
-!/*.conf
-!/*.in
-!/*.json
 !/README-LINUX.md
-!/README-WINDOWS.md
 !/README.md
-!/*.ps1
-!/*.rules
-!/*.sh
 
 !/.github/
 !/.github/workflows/
@@ -20,6 +13,11 @@
 
 !/cmake/
 !/cmake/*.cmake
+
+!/data/
+!/data/*.conf
+!/data/*.in
+!/data/*.rules
 
 !/include/
 !/include/**/
@@ -37,21 +35,9 @@
 !/packaging/ArchLinux/
 !/packaging/ArchLinux/*.in
 !/packaging/ArchLinux/*.sh
-!/packaging/debian/
-!/packaging/debian/*.in
-!/packaging/debian/*.sh
-!/packaging/debian/postinst
-!/packaging/debian/postrm
-!/packaging/debian/prerm
-!/packaging/windows/
-!/packaging/windows/*.ps1
-!/packaging/windows/launcher/
-!/packaging/windows/launcher/*.cc
-!/packaging/windows/launcher/*.hh
-!/packaging/windows/wix/
-!/packaging/windows/wix/*.wxl
-!/packaging/windows/wix/*.wxs
-!/packaging/windows/wix/*.xml
+
+!/scripts/
+!/scripts/*.sh
 
 !/src/
 !/src/**/

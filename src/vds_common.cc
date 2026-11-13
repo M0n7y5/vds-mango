@@ -31,15 +31,6 @@ std::string hex_u8(std::uint8_t value) {
   return text;
 }
 
-std::string hex_u16(std::uint16_t value) {
-  std::string text = "0x0000";
-  text[2] = kHexDigits[(value >> 12) & 0x0f];
-  text[3] = kHexDigits[(value >> 8) & 0x0f];
-  text[4] = kHexDigits[(value >> 4) & 0x0f];
-  text[5] = kHexDigits[value & 0x0f];
-  return text;
-}
-
 std::string hex_bytes(std::span<const std::uint8_t> bytes,
                       std::size_t max_bytes, char separator,
                       bool append_ellipsis) {

@@ -41,11 +41,6 @@ USB input URB completion.
 Install kernel headers for the running kernel first, then the package:
 
 ```sh
-# Debian
-sudo apt install linux-headers-$(uname -r)
-sudo apt install ./vds_<version>_<arch>.deb
-
-# Arch
 sudo pacman -S linux-headers
 sudo pacman -U vds-<version>-<arch>.pkg.tar.zst
 ```
@@ -136,13 +131,6 @@ The daemon log is `/var/log/vdsd.log`.
 - `c++20` compiler toolchain for userspace
 - `cmake` (3.12 or newer)
 - `pkg-config`
-
-On Debian-based systems:
-
-```sh
-sudo apt install git build-essential dkms cmake pkg-config
-sudo apt install libopus-dev libudev-dev libdbus-1-dev libbluetooth-dev
-```
 
 On Arch/CachyOS-based systems:
 
@@ -246,8 +234,8 @@ unless you create the group yourself (`sudo groupadd --system vds`) and restart
 > remove the required `bluetooth.service` drop-in override:
 >
 > ```sh
-> sudo ./override-bluetoothd.sh disable-input --restart
-> sudo ./override-bluetoothd.sh enable-input --restart
+> sudo ./scripts/override-bluetoothd.sh disable-input --restart
+> sudo ./scripts/override-bluetoothd.sh enable-input --restart
 > ```
 >
 > Packages install the same script as
@@ -304,7 +292,7 @@ low priority:
 
 ```sh
 mkdir -p ~/.config/wireplumber/wireplumber.conf.d
-cp 99-vds-dualsense-wireplumber.conf ~/.config/wireplumber/wireplumber.conf.d/
+cp data/99-vds-dualsense-wireplumber.conf ~/.config/wireplumber/wireplumber.conf.d/
 ```
 
 Packages ship this file as
@@ -326,7 +314,7 @@ USB-connected controller. Install the included udev rule so the virtual
 controller touchpad is classified like the real USB controller:
 
 ```sh
-sudo cp 99-vds-dualsense-udev.rules /etc/udev/rules.d/
+sudo cp data/99-vds-dualsense-udev.rules /etc/udev/rules.d/
 sudo udevadm control --reload-rules
 sudo udevadm trigger --subsystem-match=input
 ```
