@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: MIT
 // Copyright (C) 2026 Jihong Min <hurryman2212@gmail.com>
 
+#include <cerrno>
 #include <chrono>
 #include <cstdlib>
+#include <cstring>
 #include <ctime>
 #include <filesystem>
 #include <iomanip>
@@ -13,22 +15,15 @@
 #include <string_view>
 #include <utility>
 
-#ifndef _WIN32
-#include <cerrno>
-#include <cstring>
-
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#endif
 
 #include "vds_log.hh"
 
 namespace {
 
-#ifndef _WIN32
 constexpr mode_t kVdsLogFileMode = S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP;
-#endif
 
 std::string local_timestamp() {
   const auto now = std::chrono::system_clock::now();
@@ -39,25 +34,11 @@ std::string local_timestamp() {
   const std::time_t time = std::chrono::system_clock::to_time_t(now);
 
   std::tm local_time{};
-#ifdef _WIN32
-  if (localtime_s(&local_time, &time) != 0) {
-    throw std::runtime_error("failed to get local time");
-  }
-
-  std::tm utc_time{};
-  if (gmtime_s(&utc_time, &time) != 0) {
-    throw std::runtime_error("failed to get UTC time");
-  }
-
-  const long offset_seconds = static_cast<long>(
-      std::difftime(_mkgmtime(&local_time), _mkgmtime(&utc_time)));
-#else
   if (!::localtime_r(&time, &local_time)) {
     throw std::runtime_error("failed to get local time");
   }
 
   const long offset_seconds = local_time.tm_gmtoff;
-#endif
   const char offset_sign = offset_seconds < 0 ? '-' : '+';
   const long abs_offset = std::labs(offset_seconds);
   const long offset_hours = abs_offset / 3600;
@@ -82,9 +63,6 @@ void write_log_message(std::ostream &out, std::string_view message) {
 }
 
 void prepare_log_file(const std::string &path) {
-#ifdef _WIN32
-  (void)path;
-#else
   const int fd = ::open(path.c_str(), O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC,
                         kVdsLogFileMode);
   if (fd < 0) {
@@ -101,7 +79,6 @@ void prepare_log_file(const std::string &path) {
     throw std::runtime_error("failed to close log file: " + path + ": " +
                              std::strerror(errno));
   }
-#endif
 }
 
 } // namespace

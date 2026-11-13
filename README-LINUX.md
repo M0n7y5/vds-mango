@@ -41,11 +41,6 @@ USB input URB completion.
 Install kernel headers for the running kernel first, then the package:
 
 ```sh
-# Debian
-sudo apt install linux-headers-$(uname -r)
-sudo apt install ./vds_<version>_<arch>.deb
-
-# Arch
 sudo pacman -S linux-headers
 sudo pacman -U vds-<version>-<arch>.pkg.tar.zst
 ```
@@ -136,13 +131,6 @@ The daemon log is `/var/log/vdsd.log`.
 - `c++20` compiler toolchain for userspace
 - `cmake` (3.12 or newer)
 - `pkg-config`
-
-On Debian-based systems:
-
-```sh
-sudo apt install git build-essential dkms cmake pkg-config
-sudo apt install libopus-dev libudev-dev libdbus-1-dev libbluetooth-dev
-```
 
 On Arch/CachyOS-based systems:
 

@@ -89,8 +89,7 @@ _require_kernel_headers() {
 		return 0
 	fi
 	message="vds: kernel headers for $kernel_release are not installed;"
-	message="$message install linux-headers-$kernel_release (Debian) or"
-	message="$message linux-headers (Arch), then run:"
+	message="$message install its headers package (e.g. linux-headers), then run:"
 	message="$message sudo dkms install $_dkms_name/$_dkms_version"
 	echo "$message" >&2
 	exit 1

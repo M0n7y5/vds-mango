@@ -9,20 +9,9 @@
 #ifndef _VDS_DS5_PROTOCOL_H
 #define _VDS_DS5_PROTOCOL_H
 
-#ifdef _WIN32
-#ifdef _KERNEL_MODE
-typedef unsigned char vds_u8;
-typedef unsigned long vds_u32;
-#else
-#include <stdint.h>
-typedef uint8_t vds_u8;
-typedef uint32_t vds_u32;
-#endif
-#else
 #include <linux/types.h>
 typedef __u8 vds_u8;
 typedef __u32 vds_u32;
-#endif
 
 #define VDS_SONY_VENDOR_ID 0x054c
 

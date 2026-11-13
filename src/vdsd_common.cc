@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Jihong Min <hurryman2212@gmail.com>
 
 #include <algorithm>
-#include <filesystem>
 #include <ostream>
 #include <stdexcept>
 #include <string>
@@ -10,56 +9,18 @@
 #include <utility>
 #include <vector>
 
-#ifdef _WIN32
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
-#endif
-
 #include "jsonl.hh"
 #include "vds_log.hh"
 #include "vdsd_common.hh"
 
 namespace vds {
 
-namespace {
-
-#ifdef _WIN32
-std::string windows_program_data_file(std::string_view filename) {
-  const DWORD required = GetEnvironmentVariableA("ProgramData", nullptr, 0);
-  if (required == 0) {
-    throw std::runtime_error("ProgramData is not available");
-  }
-
-  std::string program_data(required, '\0');
-  const DWORD length =
-      GetEnvironmentVariableA("ProgramData", program_data.data(), required);
-  if (length == 0 || length >= required) {
-    throw std::runtime_error("ProgramData is not available");
-  }
-  program_data.resize(length);
-
-  return (std::filesystem::path(program_data) / "vDS" / filename).string();
-}
-#endif
-
-} // namespace
-
 VdsdCommonOptions default_vdsd_common_options() {
-#ifdef _WIN32
-  return VdsdCommonOptions{
-      .db_path = windows_program_data_file("vdsd.db"),
-      .log_path = windows_program_data_file("vdsd.log"),
-      .help_requested = false,
-  };
-#else
   return VdsdCommonOptions{
       .db_path = "/var/lib/vds/vdsd.db",
       .log_path = "/var/log/vdsd.log",
       .help_requested = false,
   };
-#endif
 }
 
 std::string vdsd_usage(std::string_view version, std::string_view build_year,
@@ -81,11 +42,9 @@ std::string vdsd_usage(std::string_view version, std::string_view build_year,
     text += platform_options;
   }
   text += "\n";
-#ifndef _WIN32
   text += "requires: root, vds_hcd loaded (sudo modprobe vds_hcd), "
           "bluetoothd --noplugin=input\n"
           "SIGHUP reopens the log file\n";
-#endif
   return text;
 }
 
@@ -218,56 +177,6 @@ bool trace_enabled(std::uint32_t trace_flags, std::uint32_t target) {
   return (trace_flags & target) != 0;
 }
 
-bool remember_vdsd_warning(std::vector<std::string> &warnings,
-                           std::string_view key) {
-  const auto existing =
-      std::find_if(warnings.begin(), warnings.end(),
-                   [&](std::string_view item) { return item == key; });
-  if (existing != warnings.end()) {
-    return false;
-  }
-  warnings.emplace_back(key);
-  return true;
-}
-
-void forget_vdsd_warning(std::vector<std::string> &warnings,
-                         std::string_view key) {
-  warnings.erase(
-      std::remove_if(warnings.begin(), warnings.end(),
-                     [&](std::string_view item) { return item == key; }),
-      warnings.end());
-}
-
-bool remember_vdsd_warning_state(std::vector<std::string> &warnings,
-                                 std::string_view key, std::string_view state) {
-  std::string prefix{key};
-  prefix += '\n';
-  std::string entry = prefix;
-  entry += state;
-  if (std::find(warnings.begin(), warnings.end(), entry) != warnings.end()) {
-    return false;
-  }
-
-  warnings.erase(std::remove_if(warnings.begin(), warnings.end(),
-                                [&](std::string_view existing) {
-                                  return existing.rfind(prefix, 0) == 0;
-                                }),
-                 warnings.end());
-  warnings.push_back(std::move(entry));
-  return true;
-}
-
-void forget_vdsd_warning_state(std::vector<std::string> &warnings,
-                               std::string_view key) {
-  std::string prefix{key};
-  prefix += '\n';
-  warnings.erase(std::remove_if(warnings.begin(), warnings.end(),
-                                [&](std::string_view existing) {
-                                  return existing.rfind(prefix, 0) == 0;
-                                }),
-                 warnings.end());
-}
-
 std::vector<VdsdControlPortStatus> build_vdsd_control_port_statuses(
     std::span<const VdsdControlPortCandidate> candidates,
     std::span<const VdsdControlPortBinding> bindings) {
@@ -288,93 +197,6 @@ std::vector<VdsdControlPortStatus> build_vdsd_control_port_statuses(
     });
   }
   return statuses;
-}
-
-VdsdWorkerLaunchDecision select_vdsd_worker_launch_decision(
-    const ControllerConfig &config, std::span<const unsigned> available_ports,
-    std::span<const unsigned> reserved_ports, std::string_view device_address,
-    bool virtual_port_provider_available,
-    std::span<const std::string> reserved_device_addresses) {
-  if (!virtual_port_provider_available) {
-    return VdsdWorkerLaunchDecision{
-        .status = VdsdWorkerLaunchStatus::VirtualPortProviderUnavailable,
-        .config = config,
-        .port = 0,
-        .device_address = std::string(device_address),
-    };
-  }
-
-  if (std::find(reserved_device_addresses.begin(),
-                reserved_device_addresses.end(),
-                device_address) != reserved_device_addresses.end()) {
-    return VdsdWorkerLaunchDecision{
-        .status = VdsdWorkerLaunchStatus::DeviceAddressReserved,
-        .config = config,
-        .port = 0,
-        .device_address = std::string(device_address),
-    };
-  }
-
-  const auto port =
-      select_controller_config_port(config, available_ports, reserved_ports);
-  if (!port) {
-    return VdsdWorkerLaunchDecision{
-        .status = VdsdWorkerLaunchStatus::NoAvailablePort,
-        .config = config,
-        .port = 0,
-        .device_address = std::string(device_address),
-    };
-  }
-
-  ControllerConfig worker_config = config;
-  worker_config.ports = {*port};
-  return VdsdWorkerLaunchDecision{
-      .status = VdsdWorkerLaunchStatus::Ready,
-      .config = std::move(worker_config),
-      .port = *port,
-      .device_address = std::string(device_address),
-  };
-}
-
-bool vdsd_worker_config_is_stale(const ConfigDb &db, std::string_view address,
-                                 ControllerProfile profile, unsigned port,
-                                 bool port_enabled) {
-  const ControllerConfig *config =
-      find_controller_config_by_address(db, address);
-  return config == nullptr || config->profile != profile ||
-         !controller_config_allows_port(*config, port) || !port_enabled;
-}
-
-void record_vdsd_worker_failure(
-    std::vector<VdsdWorkerFailureBackoff> &backoffs, std::string_view address,
-    std::chrono::steady_clock::time_point retry_after) {
-  const auto existing =
-      std::find_if(backoffs.begin(), backoffs.end(),
-                   [&](const auto &entry) { return entry.address == address; });
-  if (existing == backoffs.end()) {
-    backoffs.push_back(VdsdWorkerFailureBackoff{
-        .address = std::string(address),
-        .retry_after = retry_after,
-    });
-    return;
-  }
-  existing->retry_after = retry_after;
-}
-
-bool consume_vdsd_worker_retry(std::vector<VdsdWorkerFailureBackoff> &backoffs,
-                               std::string_view address,
-                               std::chrono::steady_clock::time_point now) {
-  const auto existing =
-      std::find_if(backoffs.begin(), backoffs.end(),
-                   [&](const auto &entry) { return entry.address == address; });
-  if (existing == backoffs.end()) {
-    return true;
-  }
-  if (now < existing->retry_after) {
-    return false;
-  }
-  backoffs.erase(existing);
-  return true;
 }
 
 std::string format_control_list_reply(
