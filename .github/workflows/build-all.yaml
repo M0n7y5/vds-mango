@@ -136,7 +136,7 @@ jobs:
       - name: Resolve raw version
         id: version
         run: |
-          raw_version="$(./generate-version.sh)"
+          raw_version="$(./scripts/generate-version.sh)"
           echo "raw_version=${raw_version}" >> "$GITHUB_OUTPUT"
           echo "Raw version: ${raw_version}"
 

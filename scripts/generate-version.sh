@@ -11,7 +11,7 @@ Options:
   --internal   Print an internal package metadata version:
                arch   => Arch pkgver field without pkgrel.
   --package    Print a package filename for the selected package format.
-  --name       Package name for --package. Defaults to this script's directory name.
+  --name       Package name for --package. Defaults to the repository directory name.
   --arch       Package architecture for --package.
   --pkgrel     Package release for --package. Omitted from filenames if unset.
   -h, --help   Show this help text.
@@ -24,7 +24,8 @@ script_dir=$(
 )
 mode=git
 package_format=""
-package_name=${script_dir##*/}
+package_name=${script_dir%/*}
+package_name=${package_name##*/}
 package_release=""
 package_arch=""
 version_tag_pattern='^[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*(-rc[0-9][0-9]*)?$'

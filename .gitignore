@@ -4,11 +4,7 @@
 
 !/CMakeLists.txt
 !/LICENSE
-!/*.conf
-!/*.in
 !/*.md
-!/*.rules
-!/*.sh
 
 !/.github/
 !/.github/workflows/
@@ -16,6 +12,11 @@
 
 !/cmake/
 !/cmake/*.cmake
+
+!/data/
+!/data/*.conf
+!/data/*.in
+!/data/*.rules
 
 !/include/
 !/include/**/
@@ -33,6 +34,9 @@
 !/packaging/ArchLinux/
 !/packaging/ArchLinux/*.in
 !/packaging/ArchLinux/*.sh
+
+!/scripts/
+!/scripts/*.sh
 
 !/src/
 !/src/**/

@@ -59,11 +59,11 @@ target_include_directories(vds_common PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 add_library(jsonl OBJECT src/jsonl.cc)
 target_include_directories(jsonl PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
-add_library(vds_io OBJECT src/platform/linux/vds_io.cc)
+add_library(vds_io OBJECT src/vds_io.cc)
 target_include_directories(vds_io PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
                                          ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
-add_library(vds_config OBJECT src/vds_config.cc src/platform/linux/vds_fs.cc)
+add_library(vds_config OBJECT src/vds_config.cc src/vds_fs.cc)
 target_include_directories(vds_config PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
                                              ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(vds_config PUBLIC jsonl vds_common)
@@ -126,19 +126,19 @@ if(BUILD_TESTS)
            WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 endif()
 
-add_library(vds_bt OBJECT src/platform/linux/vds_bt.cc)
+add_library(vds_bt OBJECT src/vds_bt.cc)
 target_link_libraries(vds_bt PUBLIC vds_protocol vds_io PkgConfig::BLUEZ)
 
-add_library(vds_bluez OBJECT src/platform/linux/vds_bluez.cc)
+add_library(vds_bluez OBJECT src/vds_bluez.cc)
 target_include_directories(vds_bluez PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(vds_bluez PUBLIC vds_config PkgConfig::DBUS)
 
-add_library(vds_udev OBJECT src/platform/linux/vds_udev.cc)
+add_library(vds_udev OBJECT src/vds_udev.cc)
 target_include_directories(vds_udev PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(vds_udev PUBLIC vds_config vds_common vds_io
                                       PkgConfig::UDEV)
 
-add_executable(vdsd src/platform/linux/vdsd.cc)
+add_executable(vdsd src/vdsd.cc)
 add_dependencies(vdsd vds_build_info_header)
 target_include_directories(vdsd PRIVATE ${VDS_GENERATED_DIR})
 target_link_libraries(
@@ -154,7 +154,7 @@ target_link_libraries(
           vds_udev
           vdsd_common)
 
-add_executable(vdsctl src/platform/linux/vdsctl.cc)
+add_executable(vdsctl src/vdsctl.cc)
 add_dependencies(vdsctl vds_build_info_header)
 target_include_directories(vdsctl PRIVATE ${VDS_GENERATED_DIR})
 target_link_libraries(
@@ -169,15 +169,16 @@ target_link_libraries(
 
 set(VDS_INSTALLED_VDSD "${CMAKE_INSTALL_FULL_BINDIR}/vdsd")
 set(VDS_INSTALLED_VDSCTL "${CMAKE_INSTALL_FULL_BINDIR}/vdsctl")
-set(VDS_INSTALL_SERVICE_SCRIPT ${CMAKE_CURRENT_SOURCE_DIR}/install-service.sh)
+set(VDS_INSTALL_SERVICE_SCRIPT
+    ${CMAKE_CURRENT_SOURCE_DIR}/scripts/install-service.sh)
 set(VDS_UNINSTALL_SERVICE_SCRIPT
-    ${CMAKE_CURRENT_SOURCE_DIR}/uninstall-service.sh)
+    ${CMAKE_CURRENT_SOURCE_DIR}/scripts/uninstall-service.sh)
 set(VDS_SYSTEMD_UNIT_INSTALL_DIR
     "lib/systemd/system"
     CACHE PATH "systemd unit install directory")
 set(VDS_SYSTEMD_VDSD "${CMAKE_INSTALL_FULL_BINDIR}/vdsd")
 set(VDS_SYSTEMD_SERVICE_FILE ${CMAKE_CURRENT_BINARY_DIR}/vdsd.service)
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/vdsd.service.in
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/data/vdsd.service.in
                ${VDS_SYSTEMD_SERVICE_FILE} @ONLY)
 if(IS_ABSOLUTE "${VDS_SYSTEMD_UNIT_INSTALL_DIR}")
   set(VDS_INSTALLED_SYSTEMD_SERVICE
