@@ -3,5 +3,7 @@ obj-m += vds_hcd.o
 
 vds_hcd-y := vds_hcd_core.o vds_usb_core.o dualsense.o dualsense_edge.o
 
-ccflags-y += -I$(src)/../include
+# The repository keeps the shared headers in ../include; a DKMS source tree
+# carries its own copy in ./include. Only one of the two exists per build.
+ccflags-y += $(addprefix -I,$(wildcard $(src)/../include $(src)/include))
 ccflags-y += -DVDS_VERSION=\"$(or $(VDS_VERSION),unknown)\"
