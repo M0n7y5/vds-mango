@@ -1,8 +1,8 @@
 # shellcheck shell=bash
 _dkms_name="vds_hcd"
 _dkms_version="@DKMS_VERSION@"
-_install_service="/usr/share/vds/install-service.sh"
-_uninstall_service="/usr/share/vds/uninstall-service.sh"
+_install_service="/usr/share/vds-mango/install-service.sh"
+_uninstall_service="/usr/share/vds-mango/uninstall-service.sh"
 
 _is_systemd_running() {
 	command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]
@@ -88,7 +88,7 @@ _require_kernel_headers() {
 	if [ -d "/lib/modules/$kernel_release/build" ]; then
 		return 0
 	fi
-	message="vds: kernel headers for $kernel_release are not installed;"
+	message="vds-mango: kernel headers for $kernel_release are not installed;"
 	message="$message install its headers package (e.g. linux-headers), then run:"
 	message="$message sudo dkms install $_dkms_name/$_dkms_version"
 	echo "$message" >&2
@@ -101,7 +101,7 @@ _build_dkms_module() {
 	if dkms build -m "$_dkms_name" -v "$_dkms_version"; then
 		return 0
 	fi
-	message="vds: kernel module build failed, see"
+	message="vds-mango: kernel module build failed, see"
 	message="$message /var/lib/dkms/$_dkms_name/$_dkms_version/build/make.log"
 	echo "$message" >&2
 	exit 1
@@ -113,16 +113,16 @@ _warn_legacy_config_db() {
 
 	[ -f "$db_path" ] || return 0
 	grep -qv '"profile"' "$db_path" || return 0
-	message="vds: $db_path predates 0.3.0 and cannot be read;"
+	message="vds-mango: $db_path predates 0.3.0 and cannot be read;"
 	message="$message delete it and re-register controllers with vdsctl attach"
 	echo "$message" >&2
 }
 
 _print_next_steps_notice() {
 	cat <<'NOTICE'
-vds: vdsd.service is enabled and started, udev rule installed.
+vds-mango: vdsd.service is enabled and started, udev rule installed.
 Next steps:
-  1. sudo /usr/share/vds/override-bluetoothd.sh disable-input --restart
+  1. sudo /usr/share/vds-mango/override-bluetoothd.sh disable-input --restart
      note: Bluetooth keyboards and mice stop working while disabled
   2. In bluetoothctl: pair <address> then trust <address> (hold Create and PS
      until the light bar blinks to enter pairing mode)
@@ -130,11 +130,12 @@ Next steps:
      without sudo
   4. vdsctl list-targets, then vdsctl attach <address>, then press the PS
      button on the controller
-  5. Audio: copy /usr/share/doc/vds/examples/99-vds-dualsense-wireplumber.conf
+  5. Audio: copy
+     /usr/share/doc/vds-mango/examples/99-vds-dualsense-wireplumber.conf
      to ~/.config/wireplumber/wireplumber.conf.d/ and set the pro-audio card
-     profile (see README-LINUX)
+     profile (see the README)
 Log: /var/log/vdsd.log
-Full guide: /usr/share/doc/vds/README-LINUX.md
+Full guide: /usr/share/doc/vds-mango/README.md
 NOTICE
 }
 

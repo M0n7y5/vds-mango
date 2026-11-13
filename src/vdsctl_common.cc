@@ -230,7 +230,7 @@ std::string vdsctl_usage(std::string_view version,
                          std::string_view build_year) {
   std::string text = "vdsctl (";
   text += version;
-  text += "): vDS management utility - Copyright (C) ";
+  text += "): vDS Mango management utility - Copyright (C) ";
   text += build_year;
   text += " Jihong Min\n"
           "usage:\n"

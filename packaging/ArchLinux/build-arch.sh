@@ -16,7 +16,7 @@ USAGE
 
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 repo_root=$(cd -- "${script_dir}/../.." && pwd)
-package_name="vds"
+package_name="vds-mango"
 build_root="${repo_root}/build/packaging/ArchLinux"
 output_dir="${repo_root}/dist/ArchLinux"
 pkgrel="1"
@@ -159,29 +159,27 @@ install -Dm0644 "$build_dir/vdsd.service" \
 install -Dm0644 "${repo_root}/data/99-vds-dualsense-udev.rules" \
 	"${package_root}/usr/lib/udev/rules.d/99-vds-dualsense-udev.rules"
 install -Dm0755 "${repo_root}/scripts/override-bluetoothd.sh" \
-	"${package_root}/usr/share/vds/override-bluetoothd.sh"
+	"${package_root}/usr/share/vds-mango/override-bluetoothd.sh"
 install -Dm0755 "${repo_root}/scripts/install-service.sh" \
-	"${package_root}/usr/share/vds/install-service.sh"
+	"${package_root}/usr/share/vds-mango/install-service.sh"
 install -Dm0755 "${repo_root}/scripts/uninstall-service.sh" \
-	"${package_root}/usr/share/vds/uninstall-service.sh"
+	"${package_root}/usr/share/vds-mango/uninstall-service.sh"
 install -Dm0644 "${repo_root}/data/logrotate-vds.conf" \
 	"${package_root}/etc/logrotate.d/vds"
 
 install_dkms_sources "$dkms_source_dir"
 
 install -Dm0644 "${repo_root}/README.md" \
-	"${package_root}/usr/share/doc/vds/README.md"
-install -Dm0644 "${repo_root}/README-LINUX.md" \
-	"${package_root}/usr/share/doc/vds/README-LINUX.md"
+	"${package_root}/usr/share/doc/vds-mango/README.md"
 install -Dm0644 "${repo_root}/LICENSE" \
-	"${package_root}/usr/share/licenses/vds/LICENSE"
+	"${package_root}/usr/share/licenses/vds-mango/LICENSE"
 install -Dm0644 "${repo_root}/data/99-vds-dualsense-wireplumber.conf" \
-	"${package_root}/usr/share/doc/vds/examples/99-vds-dualsense-wireplumber.conf"
+	"${package_root}/usr/share/doc/vds-mango/examples/99-vds-dualsense-wireplumber.conf"
 
 installed_size=$(du -sb "$package_root" | awk '{print $1}')
 substitute_template "${script_dir}/PKGINFO.in" "${package_root}/.PKGINFO"
 substitute_template "${script_dir}/BUILDINFO.in" "${package_root}/.BUILDINFO"
-substitute_template "${script_dir}/vds.install.in" "${package_root}/.INSTALL"
+substitute_template "${script_dir}/vds-mango.install.in" "${package_root}/.INSTALL"
 
 (
 	cd "$package_root"
