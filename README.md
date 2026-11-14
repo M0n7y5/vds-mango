@@ -64,7 +64,7 @@ and attached, as long as they can provide the DualSense-specific features
 required by games. The infrastructure could also be extended to support physical
 transports other than Bluetooth.
 
-## Quick start (package)
+## Quick start
 
 Install kernel headers for the running kernel first, then the package:
 
@@ -74,12 +74,34 @@ sudo pacman -U vds-mango-<version>-<arch>.pkg.tar.zst
 ```
 
 Without matching headers the install stops and prints the header package to
-install. The package builds `vds_hcd` through DKMS, installs the udev rule,
-creates the `vds` group, and enables and starts `vdsd.service`. It conflicts
-with the upstream `vds` package because both ship the same binaries and module.
+install. The package builds `vds_hcd` through DKMS, installs the udev and audio
+rules, and enables and starts `vdsd.service`. It conflicts with the upstream
+`vds` package because both ship the same binaries and module.
 
-1. Give `vdsd` the Bluetooth HID channels. Bluetooth keyboards and mice stop
-   working while the BlueZ input plugin is disabled:
+Then open **vDS Mango** from the application menu (or run `vds-mango`). The
+setup wizard does the rest:
+
+1. It starts the service and hands DualSense controllers from Bluetooth to
+   vDS Mango. This asks for your password once and restarts Bluetooth.
+2. Hold Create and PS until the light bar blinks rapidly, pick the controller,
+   and the wizard pairs, trusts and registers it.
+3. Press the PS button. Games now see a USB DualSense.
+
+No group membership, logout or audio configuration is needed.
+
+## Graphical app
+
+Besides the wizard, `vds-mango` lists the registered controllers with their
+connection state, changes which controller model games see and which virtual
+ports a controller may use, removes controllers, and toggles trace logging.
+Setup > Restore Bluetooth input undoes the Bluetooth change.
+
+## Command-line setup
+
+The same setup without the graphical app:
+
+1. Hand the Bluetooth HID channels to `vdsd` (see
+   [Bluetooth limitation](#bluetooth-limitation)):
 
 ```sh
 sudo /usr/share/vds-mango/override-bluetoothd.sh disable-input --restart
@@ -92,22 +114,16 @@ The script prints the effective `bluetooth.service` ExecStart when it is done.
    rapidly, then in `bluetoothctl`:
 
 ```text
+scan on
 pair XX:XX:XX:XX:XX:XX
 trust XX:XX:XX:XX:XX:XX
 ```
 
 Both steps are required: an untrusted controller will not be allowed to
-reconnect on its own.
+reconnect on its own. When re-pairing a controller that BlueZ already knows,
+run `remove XX:XX:XX:XX:XX:XX` before `scan on`.
 
-3. Use `vdsctl` without `sudo`:
-
-```sh
-sudo usermod -aG vds $USER
-```
-
-Log out and back in so the new group membership applies.
-
-4. Register the controller, then connect it:
+3. Register the controller, then connect it:
 
 ```sh
 vdsctl list-targets
@@ -117,7 +133,7 @@ vdsctl attach XX:XX:XX:XX:XX:XX
 `attach` registers the address, it does not connect. Press the PS button on the
 controller; the physical pad initiates the Bluetooth connection.
 
-5. Check the result:
+4. Check the result:
 
 ```sh
 vdsctl list
@@ -125,30 +141,7 @@ vdsctl list
 
 `connected` reports whether the pad is live, `path` is the virtual device
 (`/dev/vds0`..`/dev/vds3`) once connected, and `error` carries the last connect
-failure.
-
-6. Set the `pro-audio` card profile as described in
-   [Audio Setup](#audio-setup), then install the shipped WirePlumber rule:
-
-```sh
-mkdir -p ~/.config/wireplumber/wireplumber.conf.d
-cp /usr/share/doc/vds-mango/examples/99-vds-dualsense-wireplumber.conf \
-  ~/.config/wireplumber/wireplumber.conf.d/
-systemctl --user restart pipewire pipewire-pulse wireplumber
-```
-
-The daemon log is `/var/log/vdsd.log`.
-
-## Graphical app
-
-`vds-mango` (vDS Mango in the application menu) manages controllers without the
-command line. It lists the registered controllers with their connection state,
-adds paired controllers, changes which controller model games see and which
-virtual ports a controller may use, removes controllers, and toggles trace
-logging.
-
-It talks to `vdsd` over `/run/vdsd.sock`, so your user must be in the `vds`
-group, exactly as for `vdsctl`.
+failure. The daemon log is `/var/log/vdsd.log`.
 
 ## Controller configuration
 
@@ -196,9 +189,11 @@ active device path.
 
 - `libopus` (Bluetooth audio encoding)
 - `libudev` (virtual device discovery)
+- `libsystemd` (who is logged in at the computer)
 - `libdbus-1` (BlueZ device metadata)
 - `libbluetooth` (Bluetooth address and L2CAP helpers)
 - `qt6-base` (graphical app)
+- `polkit` (password prompt of the setup wizard)
 
 #### Build Dependencies
 
@@ -213,7 +208,7 @@ active device path.
 
 ```sh
 sudo pacman -S git base-devel dkms cmake pkgconf
-sudo pacman -S opus systemd dbus bluez-libs qt6-base
+sudo pacman -S opus systemd dbus bluez-libs qt6-base polkit
 ```
 
 Install the header package matching your running kernel separately. If your
@@ -300,93 +295,44 @@ unless you create the group yourself (`sudo groupadd --system vds`) and restart
 packaging/ArchLinux/build-arch.sh --pkgrel 1 --output-dir dist/ArchLinux
 ```
 
-## Initial Bluetooth Pairing
+## Bluetooth limitation
 
 > [!IMPORTANT]
 >
-> Current limitation: run `bluetoothd` with the input plugin disabled
-> (`--noplugin=input`). `vdsd` needs direct ownership of the Bluetooth HID
-> Control and Interrupt L2CAP channels. If the normal BlueZ input plugin is
-> active, it can claim the controller first and expose it as a regular Bluetooth
-> gamepad instead of letting `vdsd` bridge it as a virtual USB controller.
+> `bluetoothd` has to run with its input plugin disabled (`--noplugin=input`).
+> A DualSense connects on the two Bluetooth HID channels, and the input plugin
+> otherwise receives it first and exposes it as a plain Bluetooth gamepad.
 >
-> In simpler terms, using vDS Mango currently means giving up Bluetooth devices
-> like mice or keyboards.
->
-> The helper script `override-bluetoothd.sh` can install or remove the required
-> `bluetooth.service` drop-in override:
->
-> ```sh
-> sudo ./scripts/override-bluetoothd.sh disable-input --restart
-> sudo ./scripts/override-bluetoothd.sh enable-input --restart
-> ```
->
-> The package installs the same script as
-> `/usr/share/vds-mango/override-bluetoothd.sh`.
+> While the plugin is off, classic Bluetooth keyboards, mice and gamepads do
+> not work. Bluetooth audio is not affected. The setup wizard lists the paired
+> devices this affects before it changes anything.
 
-Pair each physical controller once before registering it with `vdsctl`. Start
-`bluetoothctl`, put the controller in Bluetooth pairing mode by holding Create
-and PS until the light bar blinks rapidly, then use the MAC address printed by
-`scan on`:
+The wizard and `override-bluetoothd.sh` install a `bluetooth.service` drop-in
+and restart Bluetooth. In a source checkout the script is
+`scripts/override-bluetoothd.sh`.
 
-```text
-agent NoInputNoOutput
-default-agent
-pairable on
-scan on
-pair XX:XX:XX:XX:XX:XX
-trust XX:XX:XX:XX:XX:XX
-scan off
-quit
-```
+## Audio
 
-When re-pairing a controller that BlueZ already knows, run
-`remove XX:XX:XX:XX:XX:XX` before `scan on`.
+The virtual controller is a 48 kHz, 4-channel S16_LE USB audio device: channels
+1 and 2 are the speaker, channels 3 and 4 drive the haptics.
 
-## Audio Setup
+With PipeWire and a current `alsa-ucm-conf` the controller's default profile
+already exposes all four channels, so nothing has to be configured. The package
+installs a WirePlumber rule to
+`/usr/share/wireplumber/wireplumber.conf.d/` that gives the controller stable
+display names, disables channel-mix normalization, and keeps the controller
+from becoming the default output or microphone.
 
-Configure the virtual controller audio output as 48 kHz 4-channel S16_LE PCM.
-The exact setup differs by audio stack, such as PipeWire, PulseAudio, ALSA, or
-JACK.
-
-For PipeWire/WirePlumber, set the controller card profile to `pro-audio`. Find
-the WirePlumber device id:
-
-```sh
-wpctl status
-```
-
-List the available profile indexes for that device:
-
-```sh
-pw-cli e <device-id> EnumProfile | awk '/Profile:index/{getline; idx=$2} /Profile:name/{getline; gsub(/"/, "", $2); print idx, $2}'
-```
-
-Set the `pro-audio` profile:
-
-```sh
-wpctl set-profile <device-id> <pro-audio-profile-index>
-```
-
-After setting the `pro-audio` profile, install the included WirePlumber rule. It
-gives the virtual controller stable display names, sets the output node to 4
-channels, disables channelmix normalization, and gives the microphone source a
-low priority:
+In a source checkout, install the rule yourself and restart the audio services:
 
 ```sh
 mkdir -p ~/.config/wireplumber/wireplumber.conf.d
 cp data/99-vds-dualsense-wireplumber.conf ~/.config/wireplumber/wireplumber.conf.d/
-```
-
-The package ships this file as
-`/usr/share/doc/vds-mango/examples/99-vds-dualsense-wireplumber.conf` and never
-installs it into a user configuration directory.
-
-Restart the user audio services after changing this file:
-
-```sh
 systemctl --user restart pipewire pipewire-pulse wireplumber
 ```
+
+If the sink shows only two channels, select the card's `pro-audio` profile with
+`wpctl set-profile`.
 
 ## Input Setup
 
@@ -429,9 +375,9 @@ speaker-test -D hw:<card-number>,<device-number> -c 4 -r 48000 -F S16_LE -t sine
 
 ## Runtime notes
 
-- The control socket is `/run/vdsd.sock`, owned `root:vds` with mode `0660`
-  when the `vds` group exists. Group members run `vdsctl` without `sudo`, and
-  `sudo vdsctl` always works.
+- The control socket is `/run/vdsd.sock`. `vdsd` serves root, members of the
+  `vds` group, and users logged in at the computer itself. Remote-only users
+  (SSH) and service accounts are refused; add such a user to `vds` to allow it.
 - `vdsctl list` and `vdsctl list-targets` print a table when stdout is a
   terminal. Pass `--json`, or pipe the output, to get the JSONL form that
   scripts can parse.
