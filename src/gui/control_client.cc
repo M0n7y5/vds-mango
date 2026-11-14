@@ -20,12 +20,10 @@ QString socket_error_message(QLocalSocket::LocalSocketError error,
   switch (error) {
   case QLocalSocket::ServerNotFoundError:
   case QLocalSocket::ConnectionRefusedError:
-    return "vdsd is not running (no listener at " + path +
-           "). Start it with: sudo systemctl start vdsd";
+    return "The background service (vdsd) is not running.";
   case QLocalSocket::SocketAccessError:
-    return "Permission denied on " + path +
-           ". Add your user to the vds group (sudo usermod -aG vds $USER), "
-           "then log out and back in.";
+    return "The background service (vdsd) refused the connection on " + path +
+           ".";
   default:
     return "Cannot reach vdsd at " + path + ": " + detail;
   }

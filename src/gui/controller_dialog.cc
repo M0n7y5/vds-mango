@@ -3,7 +3,6 @@
 
 #include <algorithm>
 #include <cstddef>
-#include <utility>
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -30,69 +29,38 @@ constexpr ControllerProfile kProfiles[] = {
 
 } // namespace
 
-ControllerDialog::ControllerDialog(std::vector<PairedController> candidates,
-                                   QWidget *parent)
-    : QDialog(parent), candidates_(std::move(candidates)) {
-  setWindowTitle("Add controller");
-
-  candidate_box_ = new QComboBox(this);
-  for (const PairedController &candidate : candidates_) {
-    candidate_box_->addItem(candidate.name + " (" + candidate.address + ")");
-  }
-  build(candidate_box_);
-
-  connect(candidate_box_, &QComboBox::currentIndexChanged, this,
-          [this] { show_candidate_hint(); });
-  show_candidate_hint();
-}
-
 ControllerDialog::ControllerDialog(const ControllerStatus &controller,
                                    const QString &name, QWidget *parent)
     : QDialog(parent), address_(controller.address) {
   setWindowTitle("Edit controller");
-  build(new QLabel(name + " (" + controller.address + ")", this));
-
-  profile_box_->setCurrentIndex(static_cast<int>(
-      std::find(std::begin(kProfiles), std::end(kProfiles),
-                controller.profile) -
-      std::begin(kProfiles)));
-  chosen_ports_->setChecked(!controller.ports.empty());
-  for (const unsigned port : controller.ports) {
-    if (port < port_boxes_.size()) {
-      port_boxes_[port]->setChecked(true);
-    }
-  }
-  if (controller.connected) {
-    hint_->setText("Changing how the controller appears reconnects it.");
-    hint_->show();
-  }
-  update_accept_button();
-}
-
-void ControllerDialog::build(QWidget *controller_field) {
-  hint_ = new QLabel(this);
-  hint_->setWordWrap(true);
-  hint_->hide();
 
   profile_box_ = new QComboBox(this);
   for (const ControllerProfile profile : kProfiles) {
     profile_box_->addItem(profile_label(profile));
   }
+  profile_box_->setCurrentIndex(static_cast<int>(
+      std::find(std::begin(kProfiles), std::end(kProfiles),
+                controller.profile) -
+      std::begin(kProfiles)));
   profile_box_->setToolTip(
       "Which USB controller games see. Automatic matches the physical "
       "controller. Pick a model when a game supports only one of the two.");
 
-  any_port_ = new QRadioButton("Any free port", this);
-  any_port_->setChecked(true);
+  auto *any_port = new QRadioButton("Any free port", this);
   chosen_ports_ = new QRadioButton("Only:", this);
+  any_port->setChecked(controller.ports.empty());
+  chosen_ports_->setChecked(!controller.ports.empty());
   auto *ports_row = new QHBoxLayout;
-  ports_row->addWidget(any_port_);
+  ports_row->addWidget(any_port);
   ports_row->addSpacing(12);
   ports_row->addWidget(chosen_ports_);
   for (std::size_t port = 0; port < port_boxes_.size(); ++port) {
     port_boxes_[port] = new QCheckBox(QString::number(port), this);
-    port_boxes_[port]->setToolTip(
-        QString::fromStdString(port_path_for_index(static_cast<unsigned>(port))));
+    port_boxes_[port]->setToolTip(QString::fromStdString(
+        port_path_for_index(static_cast<unsigned>(port))));
+    port_boxes_[port]->setChecked(
+        std::find(controller.ports.begin(), controller.ports.end(), port) !=
+        controller.ports.end());
     ports_row->addWidget(port_boxes_[port]);
     connect(port_boxes_[port], &QCheckBox::toggled, this,
             [this] { update_accept_button(); });
@@ -102,7 +70,8 @@ void ControllerDialog::build(QWidget *controller_field) {
           [this] { update_accept_button(); });
 
   auto *form = new QFormLayout;
-  form->addRow("Controller:", controller_field);
+  form->addRow("Controller:",
+               new QLabel(name + " (" + controller.address + ")", this));
   form->addRow("Appears as:", profile_box_);
   form->addRow("Virtual port:", ports_row);
 
@@ -114,23 +83,13 @@ void ControllerDialog::build(QWidget *controller_field) {
 
   auto *layout = new QVBoxLayout(this);
   layout->addLayout(form);
-  layout->addWidget(hint_);
+  if (controller.connected) {
+    layout->addWidget(new QLabel(
+        "Changing how the controller appears reconnects it.", this));
+  }
   layout->addWidget(buttons);
 
   update_accept_button();
-}
-
-void ControllerDialog::show_candidate_hint() {
-  const PairedController &candidate =
-      candidates_.at(static_cast<std::size_t>(candidate_box_->currentIndex()));
-  if (candidate.trusted) {
-    hint_->hide();
-    return;
-  }
-  hint_->setText("This controller is not trusted in BlueZ, so it will not "
-                 "reconnect on its own. Run \"trust " +
-                 candidate.address + "\" in bluetoothctl.");
-  hint_->show();
 }
 
 void ControllerDialog::update_accept_button() {
@@ -145,12 +104,7 @@ void ControllerDialog::update_accept_button() {
 
 ControllerAssignment ControllerDialog::assignment() const {
   ControllerAssignment result{
-      .address = candidate_box_
-                     ? candidates_
-                           .at(static_cast<std::size_t>(
-                               candidate_box_->currentIndex()))
-                           .address
-                     : address_,
+      .address = address_,
       .profile =
           kProfiles[static_cast<std::size_t>(profile_box_->currentIndex())],
       .ports = {},

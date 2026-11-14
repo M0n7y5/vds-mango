@@ -13,7 +13,7 @@ pkg_check_modules(DBUS REQUIRED IMPORTED_TARGET dbus-1)
 pkg_check_modules(OPUS REQUIRED IMPORTED_TARGET opus)
 pkg_check_modules(UDEV REQUIRED IMPORTED_TARGET libudev)
 pkg_check_modules(SYSTEMD REQUIRED IMPORTED_TARGET libsystemd)
-find_package(Qt6 REQUIRED COMPONENTS Widgets Network)
+find_package(Qt6 REQUIRED COMPONENTS Widgets Network DBus)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -43,7 +43,9 @@ add_custom_target(
   vds_build_info_header ALL
   COMMAND
     ${CMAKE_COMMAND} -DVDS_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}
-    -DVDS_BUILD_INFO_HEADER=${VDS_BUILD_INFO_HEADER} -P ${VDS_BUILD_INFO_SCRIPT}
+    -DVDS_BUILD_INFO_HEADER=${VDS_BUILD_INFO_HEADER}
+    -DVDS_SETUP_HELPER=${CMAKE_INSTALL_FULL_DATADIR}/vds-mango/setup-helper.sh
+    -P ${VDS_BUILD_INFO_SCRIPT}
   BYPRODUCTS ${VDS_BUILD_INFO_HEADER}
   COMMENT "Generating vDS build info header"
   VERBATIM)
@@ -190,8 +192,14 @@ target_link_libraries(
 
 add_executable(
   vds-mango
-  src/gui/vds_mango.cc src/gui/control_client.cc src/gui/controller_dialog.cc
-  src/gui/controller_model.cc src/gui/main_window.cc)
+  src/gui/vds_mango.cc
+  src/gui/bluez.cc
+  src/gui/control_client.cc
+  src/gui/controller_dialog.cc
+  src/gui/controller_model.cc
+  src/gui/main_window.cc
+  src/gui/setup_helper.cc
+  src/gui/setup_wizard.cc)
 add_dependencies(vds-mango vds_build_info_header)
 target_include_directories(vds-mango PRIVATE ${VDS_GENERATED_DIR})
 target_link_libraries(
@@ -200,14 +208,25 @@ target_link_libraries(
           vds_common
           vds_config
           vds_gui_protocol
+          Qt6::DBus
           Qt6::Network
           Qt6::Widgets)
 
-set(VDS_INSTALLED_VDSD "${CMAKE_INSTALL_FULL_BINDIR}/vdsd")
-set(VDS_INSTALLED_VDSCTL "${CMAKE_INSTALL_FULL_BINDIR}/vdsctl")
-set(VDS_INSTALLED_GUI "${CMAKE_INSTALL_FULL_BINDIR}/vds-mango")
-set(VDS_INSTALLED_DESKTOP_ENTRY
-    "${CMAKE_INSTALL_FULL_DATADIR}/applications/vds-mango.desktop")
+set(VDS_POLKIT_POLICY
+    ${CMAKE_CURRENT_BINARY_DIR}/io.github.m0n7y5.vds-mango.policy)
+set(VDS_SETUP_HELPER "${CMAKE_INSTALL_FULL_DATADIR}/vds-mango/setup-helper.sh")
+configure_file(
+  ${CMAKE_CURRENT_SOURCE_DIR}/data/io.github.m0n7y5.vds-mango.policy.in
+  ${VDS_POLKIT_POLICY} @ONLY)
+set(VDS_INSTALLED_FILES
+    "${CMAKE_INSTALL_FULL_BINDIR}/vdsd"
+    "${CMAKE_INSTALL_FULL_BINDIR}/vdsctl"
+    "${CMAKE_INSTALL_FULL_BINDIR}/vds-mango"
+    "${CMAKE_INSTALL_FULL_DATADIR}/applications/vds-mango.desktop"
+    "${CMAKE_INSTALL_FULL_DATADIR}/polkit-1/actions/io.github.m0n7y5.vds-mango.policy"
+    "${CMAKE_INSTALL_FULL_DATADIR}/vds-mango/setup-helper.sh"
+    "${CMAKE_INSTALL_FULL_DATADIR}/vds-mango/override-bluetoothd.sh"
+)
 set(VDS_INSTALL_SERVICE_SCRIPT
     ${CMAKE_CURRENT_SOURCE_DIR}/scripts/install-service.sh)
 set(VDS_UNINSTALL_SERVICE_SCRIPT
@@ -251,6 +270,10 @@ install(TARGETS vdsd vdsctl vds-mango
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 install(FILES data/vds-mango.desktop
         DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
+install(FILES ${VDS_POLKIT_POLICY}
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/polkit-1/actions)
+install(PROGRAMS scripts/setup-helper.sh scripts/override-bluetoothd.sh
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/vds-mango)
 
 if(INSTALL_SERVICE)
   install(FILES ${VDS_SYSTEMD_SERVICE_FILE}
@@ -260,13 +283,8 @@ if(INSTALL_SERVICE)
     uninstall
     COMMAND ${VDS_UNINSTALL_SERVICE_SCRIPT} --stop --disable --remove-file
             ${VDS_INSTALLED_SYSTEMD_SERVICE}
-    COMMAND
-      ${CMAKE_COMMAND} -E rm -f ${VDS_INSTALLED_VDSD} ${VDS_INSTALLED_VDSCTL}
-      ${VDS_INSTALLED_GUI} ${VDS_INSTALLED_DESKTOP_ENTRY})
+    COMMAND ${CMAKE_COMMAND} -E rm -f ${VDS_INSTALLED_FILES})
 else()
-  add_custom_target(
-    uninstall
-    COMMAND
-      ${CMAKE_COMMAND} -E rm -f ${VDS_INSTALLED_VDSD} ${VDS_INSTALLED_VDSCTL}
-      ${VDS_INSTALLED_GUI} ${VDS_INSTALLED_DESKTOP_ENTRY})
+  add_custom_target(uninstall COMMAND ${CMAKE_COMMAND} -E rm -f
+                                      ${VDS_INSTALLED_FILES})
 endif()

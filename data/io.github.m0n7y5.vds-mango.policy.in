@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC
+ "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<policyconfig>
+  <vendor>vDS Mango</vendor>
+  <vendor_url>https://github.com/M0n7y5/vds-mango</vendor_url>
+  <action id="io.github.m0n7y5.vds-mango.setup">
+    <description>Set up vDS Mango</description>
+    <message>Authentication is required to start the vDS Mango service and to change how Bluetooth handles game controllers</message>
+    <icon_name>input-gaming</icon_name>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">@VDS_SETUP_HELPER@</annotate>
+  </action>
+</policyconfig>
