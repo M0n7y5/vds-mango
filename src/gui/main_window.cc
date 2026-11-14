@@ -163,10 +163,10 @@ QWidget *MainWindow::build_advanced_page() {
   intro->setWordWrap(true);
 
   const std::pair<unsigned, const char *> choices[] = {
-      {64, "Standard: about 95 ms, safest"},
-      {32, "Reduced: about 61 ms"},
-      {24, "Low: about 59 ms"},
-      {16, "Lowest: about 51 ms, the speaker may crackle"},
+      {64, "Standard: about 78 ms, safest"},
+      {32, "Reduced: about 50 ms"},
+      {24, "Low: about 45 ms"},
+      {16, "Lowest: about 33 ms, the speaker may crackle"},
   };
 
   auto *group = new QGroupBox("Haptics and speaker delay", this);
