@@ -35,12 +35,6 @@ constexpr std::pair<unsigned, const char *> kDelays[] = {
     {16, "Lowest: about 33 ms, the speaker may crackle"},
 };
 
-// Qt wraps a tooltip only when it is rich text; plain text stays on one line
-// however long it is.
-QString wrapped_tooltip(const char *text) {
-  return QString("<p>%1</p>").arg(text);
-}
-
 } // namespace
 
 ControllerDialog::ControllerDialog(const ControllerStatus &controller,
@@ -56,9 +50,8 @@ ControllerDialog::ControllerDialog(const ControllerStatus &controller,
       std::find(std::begin(kProfiles), std::end(kProfiles),
                 controller.profile) -
       std::begin(kProfiles)));
-  profile_box_->setToolTip(wrapped_tooltip(
-      "Which USB controller games see. Automatic matches the physical "
-      "controller. Pick a model when a game supports only one of the two."));
+  profile_box_->setToolTip(
+      "The controller model games see. Automatic matches the real one.");
 
   delay_box_ = new QComboBox(this);
   for (const auto &[length, label] : kDelays) {
@@ -66,11 +59,8 @@ ControllerDialog::ControllerDialog(const ControllerStatus &controller,
   }
   delay_box_->setCurrentIndex(
       std::max(0, delay_box_->findData(controller.audio_buffer)));
-  delay_box_->setToolTip(wrapped_tooltip(
-      "How much audio the controller queues before it plays haptics and "
-      "speaker sound. Lower values react sooner, but too little makes the "
-      "sound crackle, especially farther from the computer. The delays were "
-      "measured on one DualSense lying next to the computer."));
+  delay_box_->setToolTip(
+      "Lower reacts sooner. Too low makes the sound crackle.");
 
   auto *any_port = new QRadioButton("Any free port", this);
   chosen_ports_ = new QRadioButton("Only:", this);
