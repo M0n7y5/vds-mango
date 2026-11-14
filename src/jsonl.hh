@@ -15,6 +15,9 @@ struct JsonlValue {
   bool is_array = false;
   bool bool_value = false;
   bool is_bool = false;
+  /// Filled instead of array_value when the array holds strings, as the
+  /// scope list of a trace reply does.
+  std::vector<std::string> string_array_value = {};
 };
 
 struct JsonlField {

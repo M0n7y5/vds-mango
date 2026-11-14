@@ -1,6 +1,9 @@
 # shellcheck shell=bash
 _dkms_name="vds_hcd"
-_dkms_version="@DKMS_VERSION@"
+# Set from the package version pacman passes in, which is also the version
+# of the module sources under /usr/src.
+_dkms_version=""
+_override_bluetoothd="/usr/share/vds-mango/override-bluetoothd.sh"
 _install_service="/usr/share/vds-mango/install-service.sh"
 _uninstall_service="/usr/share/vds-mango/uninstall-service.sh"
 
@@ -120,6 +123,23 @@ _warn_legacy_config_db() {
 	echo "$message" >&2
 }
 
+# The setup wizard switches bluetoothd's input plugin off. Left behind, that
+# keeps Bluetooth keyboards and mice dead after the package is gone, and the
+# script that undoes it goes with the package.
+_restore_bluetooth_input() {
+	_is_systemd_running || return 0
+	[ -x "$_override_bluetoothd" ] || return 0
+	systemctl show -p ExecStart --value bluetooth.service 2>/dev/null |
+		grep -q -- '--noplugin=input' || return 0
+	if "$_override_bluetoothd" --restart enable-input >/dev/null; then
+		echo "vds-mango: Bluetooth input restored; bluetoothd was restarted."
+	else
+		echo "vds-mango: could not restore Bluetooth input; remove the" \
+			"--noplugin=input drop-in under" \
+			"/etc/systemd/system/bluetooth.service.d/ by hand." >&2
+	fi
+}
+
 _print_next_steps_notice() {
 	cat <<'NOTICE'
 vds-mango: vdsd.service is enabled and started.
@@ -131,6 +151,7 @@ NOTICE
 }
 
 post_install() {
+	_dkms_version=${1%-*}
 	_dkms_install_current
 	_reload_udev_rules
 	_ensure_vds_group
@@ -145,6 +166,7 @@ pre_upgrade() {
 }
 
 post_upgrade() {
+	_dkms_version=${1%-*}
 	_dkms_install_current
 	_reload_udev_rules
 	_ensure_vds_group
@@ -157,6 +179,7 @@ pre_remove() {
 	if [ -x "$_uninstall_service" ]; then
 		"$_uninstall_service" --stop --disable || true
 	fi
+	_restore_bluetooth_input
 	_unload_vds_hcd_module || return 1
 	_dkms_remove_all_versions --ignore-errors
 }

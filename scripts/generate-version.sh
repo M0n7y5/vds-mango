@@ -7,7 +7,7 @@ Usage: ./generate-version.sh [--internal arch]
        ./generate-version.sh --package arch --arch ARCH [--name NAME] [--pkgrel REL]
 
 Options:
-  Default      Print the nearest X.X.X[-rcN] tag version.
+  Default      Print the nearest X.X.X[-betaN|-rcN] tag version.
   --internal   Print an internal package metadata version:
                arch   => Arch pkgver field without pkgrel.
   --package    Print a package filename for the selected package format.
@@ -28,7 +28,7 @@ package_name=${script_dir%/*}
 package_name=${package_name##*/}
 package_release=""
 package_arch=""
-version_tag_pattern='^[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*(-rc[0-9][0-9]*)?$'
+version_tag_pattern='^[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*(-(beta|rc)[0-9][0-9]*)?$'
 
 while [ "$#" -gt 0 ]; do
 	case "$1" in
@@ -147,20 +147,22 @@ git_version() {
 version_tag_is_greater() {
 	awk -v left="$1" -v right="$2" '
     function parse(tag, out) {
-      if (match(tag, /^([0-9]+)\.([0-9]+)\.([0-9]+)(-rc([0-9]+))?$/, m) == 0) {
+      if (match(tag, /^([0-9]+)\.([0-9]+)\.([0-9]+)(-(beta|rc)([0-9]+))?$/, m) == 0) {
         return 0
       }
       out[1] = m[1] + 0
       out[2] = m[2] + 0
       out[3] = m[3] + 0
-      out[4] = (m[5] == "") ? -1 : m[5] + 0
+      # beta < rc < release
+      out[4] = (m[5] == "") ? 2 : (m[5] == "rc") ? 1 : 0
+      out[5] = (m[6] == "") ? 0 : m[6] + 0
       return 1
     }
     BEGIN {
       if (!parse(left, l) || !parse(right, r)) {
         exit 1
       }
-      for (i = 1; i <= 3; ++i) {
+      for (i = 1; i <= 4; ++i) {
         if (l[i] > r[i]) {
           exit 0
         }
@@ -168,13 +170,7 @@ version_tag_is_greater() {
           exit 1
         }
       }
-      if (l[4] == -1 && r[4] != -1) {
-        exit 0
-      }
-      if (l[4] != -1 && r[4] == -1) {
-        exit 1
-      }
-      exit (l[4] > r[4]) ? 0 : 1
+      exit (l[5] > r[5]) ? 0 : 1
     }
   '
 }
@@ -194,10 +190,14 @@ has_dirty_suffix() {
 	esac
 }
 
+# pacman sorts 0.5.0_rc1 after 0.5.0 but 0.5.0rc1 before it, so a pre-release
+# suffix is attached without a separator.
 sanitize_arch_base() {
 	printf '%s' "$1" |
 		sed \
 			-e 's/^v//' \
+			-e 's/-beta/beta/' \
+			-e 's/-rc/rc/' \
 			-e 's/-/_/g' \
 			-e 's/[^A-Za-z0-9_.+]/_/g'
 }

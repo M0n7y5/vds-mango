@@ -4,6 +4,13 @@ vDS Mango is a Linux-only fork of [vDS](https://github.com/hurryman2212/vds)
 (virtual DualSense) by Jihong Min. It is developed and tested on CachyOS and
 Arch Linux.
 
+> [!WARNING]
+>
+> This is a beta. It has been tested on one machine: CachyOS with the
+> `linux-cachyos` kernel, KDE Plasma, PipeWire and one DualSense. A DualSense
+> Edge, several controllers at once and Secure Boot are untested. See
+> [Reporting Issues](#reporting-issues) if something does not work.
+
 It is a virtual USB-to-Bluetooth bridge for DualSense and DualSense Edge
 Wireless Controllers. It supports all USB-based DualSense features over
 Bluetooth (except firmware update), including quadraphonic haptic feedback
@@ -66,11 +73,12 @@ transports other than Bluetooth.
 
 ## Quick start
 
-Install kernel headers for the running kernel first, then the package:
+Install kernel headers for the running kernel first, then the package from the
+AUR, which builds it from source:
 
 ```sh
 sudo pacman -S linux-cachyos-headers # linux-headers on Arch
-sudo pacman -U vds-mango-<version>-<arch>.pkg.tar.zst
+paru -S vds-mango                    # or another AUR helper
 ```
 
 Without matching headers the install stops and prints the header package to
@@ -78,8 +86,16 @@ install. The package builds `vds_hcd` through DKMS, installs the udev and audio
 rules, and enables and starts `vdsd.service`. It conflicts with the upstream
 `vds` package because both ship the same binaries and module.
 
-Then open **vDS Mango** from the application menu (or run `vds-mango`). The
-setup wizard does the rest:
+With Secure Boot enabled the kernel only loads signed modules. DKMS signs
+`vds_hcd` with its own key, which has to be enrolled once, followed by a
+reboot:
+
+```sh
+sudo mokutil --import /var/lib/dkms/mok.pub
+```
+
+After installing, open **vDS Mango** from the application menu (or run
+`vds-mango`). The setup wizard does the rest:
 
 1. It starts the service and hands DualSense controllers from Bluetooth to
    vDS Mango. This asks for your password once and restarts Bluetooth.
@@ -88,6 +104,10 @@ setup wizard does the rest:
 3. Press the PS button. Games now see a USB DualSense.
 
 No group membership, logout or audio configuration is needed.
+
+Removing the package (`sudo pacman -R vds-mango`) gives the Bluetooth HID
+channels back to `bluetoothd` and restarts Bluetooth. Registered controllers
+in `/var/lib/vds` and the log are kept.
 
 ## Graphical app
 
@@ -300,6 +320,10 @@ unless you create the group yourself (`sudo groupadd --system vds`) and restart
 ### Package build
 
 ```sh
+# The tagged release, as the AUR package builds it
+(cd packaging/ArchLinux && makepkg -si)
+
+# The working tree, without makepkg
 packaging/ArchLinux/build-arch.sh --pkgrel 1 --output-dir dist/ArchLinux
 ```
 
@@ -401,9 +425,12 @@ speaker-test -D hw:<card-number>,<device-number> -c 4 -r 48000 -F S16_LE -t sine
 
 ## Reporting Issues
 
-When reporting an issue, include the distribution, vDS Mango version,
-controller model, connection type (e.g. your bluetooth adapter's model name),
-affected application or game, and reproduction steps.
+Report bugs on the [CachyOS Discord](https://discord.gg/cachyos-862292009423470592).
+The GitHub issue tracker is not open yet.
+
+Include the distribution, kernel (`uname -r`), vDS Mango version
+(`vdsctl --version`), controller model, your Bluetooth adapter, the affected
+application or game, and the steps to reproduce it.
 
 For runtime problems, enable tracing before reproducing the issue, then turn it
 off afterwards:

@@ -51,12 +51,21 @@ void test_require_bool_rejects_a_quoted_bool() {
   VDS_CHECK_THROWS(vds::require_jsonl_bool(fields, "OK", "test_jsonl"));
 }
 
+void test_unsigned_array_accessor_rejects_a_string_array() {
+  // An attach request with "ports":["0"] must not be read as "any port".
+  const auto fields =
+      vds::parse_jsonl_object("{\"ports\":[\"0\"]}", "test_jsonl");
+  VDS_CHECK_THROWS(
+      vds::require_jsonl_unsigned_array(fields, "ports", "test_jsonl"));
+}
+
 void run_tests() {
   test_duplicate_keys_keep_both_fields();
   test_true_literal_parses_as_a_bool();
   test_false_literal_parses_as_a_bool();
   test_truncated_true_literal_is_rejected();
   test_require_bool_rejects_a_quoted_bool();
+  test_unsigned_array_accessor_rejects_a_string_array();
 }
 
 } // namespace vds::test

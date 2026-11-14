@@ -3,6 +3,8 @@
 
 #include "vds_check.hh"
 
+#include <iostream>
+#include <sstream>
 #include <string>
 #include <string_view>
 
@@ -51,11 +53,37 @@ void test_targets_table_pads_columns_to_the_widest_cell() {
   VDS_CHECK_EQ(vds::format_vdsctl_targets_table(kReply), std::string(kTable));
 }
 
+void test_trace_on_succeeds_when_the_reply_lists_enabled_scopes() {
+  // A string array in the reply must not turn a successful trace command
+  // into a parse error and exit status 1.
+  std::string command = "vdsctl";
+  std::string name = "trace";
+  std::string mode = "on";
+  std::string flag = "--scope";
+  std::string scope = "output";
+  char *argv[] = {command.data(), name.data(), mode.data(), flag.data(),
+                  scope.data()};
+  const vds::VdsctlPlatform platform{
+      .request_control =
+          [](const std::string &) {
+            return std::string("{\"OK\":true,\"error\":\"\",\"trace\":true,"
+                               "\"scope\":[\"input-control\",\"output\"]}\n");
+          },
+      .is_tty = [] { return false; },
+  };
+  std::ostringstream captured;
+  auto *const previous = std::cout.rdbuf(captured.rdbuf());
+  const int status = vds::run_vdsctl_app(5, argv, "test", "2026", platform);
+  std::cout.rdbuf(previous);
+  VDS_CHECK_EQ(status, 0);
+}
+
 void run_tests() {
   test_empty_list_reply_names_the_next_command();
   test_empty_targets_reply_names_the_pairing_tool();
   test_list_table_pads_columns_to_the_widest_cell();
   test_targets_table_pads_columns_to_the_widest_cell();
+  test_trace_on_succeeds_when_the_reply_lists_enabled_scopes();
 }
 
 } // namespace vds::test

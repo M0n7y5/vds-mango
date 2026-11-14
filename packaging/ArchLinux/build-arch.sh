@@ -82,41 +82,12 @@ substitute_template() {
 	sed \
 		-e "s|@PKGVER@|${pkgver}|g" \
 		-e "s|@PKGREL@|${pkgrel}|g" \
-		-e "s|@DKMS_VERSION@|${dkms_version}|g" \
 		-e "s|@ARCH@|${arch}|g" \
 		-e "s|@SIZE@|${installed_size}|g" \
 		-e "s|@BUILDDATE@|${build_date}|g" \
 		-e "s|@BUILDROOT@|${build_root}|g" \
 		-e "s|@REPOROOT@|${repo_root}|g" \
 		"$input" >"$output"
-}
-
-install_dkms_sources() {
-	local dkms_source_dir=$1
-	local source
-
-	install -d "$dkms_source_dir/include"
-	install -m0644 "${repo_root}/module/Makefile" \
-		"${repo_root}/module/Kbuild" \
-		"$dkms_source_dir/"
-	for source in "${repo_root}/module/"*.c; do
-		case "$(basename "$source")" in
-		*.mod.c)
-			continue
-			;;
-		esac
-		install -m0644 "$source" "$dkms_source_dir/"
-	done
-	for source in "${repo_root}/module/"*.h; do
-		install -m0644 "$source" "$dkms_source_dir/"
-	done
-	sed "s/^PACKAGE_VERSION=.*/PACKAGE_VERSION=\"${dkms_version}\"/" \
-		"${repo_root}/module/dkms.conf" >"${dkms_source_dir}/dkms.conf"
-	install -d "${dkms_source_dir}/include/uapi" "${dkms_source_dir}/include/vds"
-	install -m0644 "${repo_root}/include/uapi/"*.h \
-		"${dkms_source_dir}/include/uapi/"
-	install -m0644 "${repo_root}/include/vds/"*.h \
-		"${dkms_source_dir}/include/vds/"
 }
 
 require_tool bsdtar
@@ -136,46 +107,24 @@ pkgver=$("${repo_root}/scripts/generate-version.sh" "${version_args[@]}")
 dkms_version=$pkgver
 build_date=$(date +%s)
 build_dir="${build_root}/cmake"
-stage_dir="${build_root}/stage"
 package_root="${build_root}/${package_name}-${pkgver}-${pkgrel}-${arch}"
-dkms_source_dir="${package_root}/usr/src/vds_hcd-${dkms_version}"
 output_dir=$(realpath -m "$output_dir")
 package_path="${output_dir}/$("${repo_root}/scripts/generate-version.sh" "${package_args[@]}")"
 
-rm -rf "$build_dir" "$stage_dir" "$package_root"
-mkdir -p "$build_dir" "$stage_dir" "$package_root" "$output_dir"
+rm -rf "$build_dir" "$package_root"
+mkdir -p "$build_dir" "$package_root" "$output_dir"
 
 cmake -S "$repo_root" -B "$build_dir" \
 	-DCMAKE_BUILD_TYPE=Release \
 	-DCMAKE_INSTALL_PREFIX=/usr \
 	-DINSTALL_SERVICE=OFF
 cmake --build "$build_dir" --parallel "$jobs"
-DESTDIR="$stage_dir" cmake --install "$build_dir"
-
-cp -a "$stage_dir/." "$package_root/"
-
-install -Dm0644 "$build_dir/vdsd.service" \
-	"${package_root}/usr/lib/systemd/system/vdsd.service"
-install -Dm0644 "${repo_root}/data/99-vds-dualsense-udev.rules" \
-	"${package_root}/usr/lib/udev/rules.d/99-vds-dualsense-udev.rules"
-install -Dm0755 "${repo_root}/scripts/install-service.sh" \
-	"${package_root}/usr/share/vds-mango/install-service.sh"
-install -Dm0755 "${repo_root}/scripts/uninstall-service.sh" \
-	"${package_root}/usr/share/vds-mango/uninstall-service.sh"
-install -Dm0644 "${repo_root}/data/logrotate-vds.conf" \
-	"${package_root}/etc/logrotate.d/vds"
-
-install_dkms_sources "$dkms_source_dir"
-
-install -Dm0644 "${repo_root}/README.md" \
-	"${package_root}/usr/share/doc/vds-mango/README.md"
-install -Dm0644 "${repo_root}/LICENSE" \
-	"${package_root}/usr/share/licenses/vds-mango/LICENSE"
+"${script_dir}/stage.sh" "$repo_root" "$build_dir" "$package_root" "$dkms_version"
 
 installed_size=$(du -sb "$package_root" | awk '{print $1}')
 substitute_template "${script_dir}/PKGINFO.in" "${package_root}/.PKGINFO"
 substitute_template "${script_dir}/BUILDINFO.in" "${package_root}/.BUILDINFO"
-substitute_template "${script_dir}/vds-mango.install.in" "${package_root}/.INSTALL"
+install -m0644 "${script_dir}/vds-mango.install" "${package_root}/.INSTALL"
 
 (
 	cd "$package_root"
