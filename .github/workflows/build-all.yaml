@@ -49,6 +49,7 @@ jobs:
             pkg-config \
             libopus-dev \
             libudev-dev \
+            libsystemd-dev \
             libdbus-1-dev \
             libbluetooth-dev \
             qt6-base-dev \

@@ -12,6 +12,7 @@ pkg_check_modules(BLUEZ REQUIRED IMPORTED_TARGET bluez)
 pkg_check_modules(DBUS REQUIRED IMPORTED_TARGET dbus-1)
 pkg_check_modules(OPUS REQUIRED IMPORTED_TARGET opus)
 pkg_check_modules(UDEV REQUIRED IMPORTED_TARGET libudev)
+pkg_check_modules(SYSTEMD REQUIRED IMPORTED_TARGET libsystemd)
 find_package(Qt6 REQUIRED COMPONENTS Widgets Network)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -171,7 +172,8 @@ target_link_libraries(
           vds_io
           vds_log
           vds_udev
-          vdsd_common)
+          vdsd_common
+          PkgConfig::SYSTEMD)
 
 add_executable(vdsctl src/vdsctl.cc)
 add_dependencies(vdsctl vds_build_info_header)

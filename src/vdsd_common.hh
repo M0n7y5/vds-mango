@@ -71,6 +71,7 @@ bool trace_enabled(std::uint32_t trace_flags, std::uint32_t target);
 std::vector<VdsdControlPortStatus> build_vdsd_control_port_statuses(
     std::span<const VdsdControlPortCandidate> candidates,
     std::span<const VdsdControlPortBinding> bindings);
+std::string format_control_error_reply(std::string_view error);
 std::string handle_vdsd_control_command(
     std::string_view request, const std::string &db_path,
     std::span<const VdsdControlControllerStatus> controllers,
