@@ -183,6 +183,31 @@ std::vector<unsigned> parse_jsonl_unsigned_array(std::string_view text,
   }
 }
 
+std::vector<std::string> parse_jsonl_string_array(std::string_view text,
+                                                  std::size_t &offset,
+                                                  std::string_view context) {
+  std::vector<std::string> values;
+  require_jsonl_char(text, offset, '[', context);
+  while (true) {
+    skip_jsonl_space(text, offset);
+    values.push_back(parse_jsonl_string(text, offset, context));
+    skip_jsonl_space(text, offset);
+    if (offset >= text.size()) {
+      throw std::runtime_error("unterminated JSON array" +
+                               context_suffix(context));
+    }
+    if (text[offset] == ']') {
+      ++offset;
+      return values;
+    }
+    if (text[offset] != ',') {
+      throw std::runtime_error("expected JSON array separator" +
+                               context_suffix(context));
+    }
+    ++offset;
+  }
+}
+
 JsonlValue parse_jsonl_value(std::string_view text, std::size_t &offset,
                              std::string_view context) {
   skip_jsonl_space(text, offset);
@@ -197,6 +222,14 @@ JsonlValue parse_jsonl_value(std::string_view text, std::size_t &offset,
     };
   }
   if (text[offset] == '[') {
+    std::size_t first = offset + 1;
+    skip_jsonl_space(text, first);
+    if (first < text.size() && text[first] == '"') {
+      JsonlValue value;
+      value.string_array_value =
+          parse_jsonl_string_array(text, offset, context);
+      return value;
+    }
     return JsonlValue{
         .string_value = {},
         .array_value = parse_jsonl_unsigned_array(text, offset, context),
