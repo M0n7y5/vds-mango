@@ -1931,7 +1931,9 @@ int next_wakeup_timeout_ms(std::span<const VirtualPort> ports,
 
 bool flush_pending_audio_chunk(VirtualPort &port,
                                vds::BtL2capBackend &bt_backend,
-                               std::uint32_t trace_flags, vds::Logger &logger) {
+                               std::uint32_t trace_flags,
+                               std::uint8_t audio_buffer_length,
+                               vds::Logger &logger) {
   if (port.pending_audio_chunks.empty()) {
     return true;
   }
@@ -1968,7 +1970,7 @@ bool flush_pending_audio_chunk(VirtualPort &port,
   const auto &chunk = port.pending_audio_chunks.front();
   const auto packet = port.haptics_builder.build_packet(
       chunk.haptics, chunk.speaker, port.output_state.state(), true,
-      port.headset_plugged);
+      port.headset_plugged, audio_buffer_length);
   const auto send_start = Clock::now();
   if (!bt_backend.try_send_output_report(packet)) {
     ++port.trace_state.dropped_audio_haptics_count;
@@ -2059,7 +2061,8 @@ void enqueue_speaker_waveout_chunk(VirtualPort &port, std::uint32_t trace_flags,
 
 void flush_pending_outputs(std::vector<VirtualPort> &ports,
                            std::vector<ControllerRuntime> &controllers,
-                           std::uint32_t trace_flags, vds::Logger &logger,
+                           std::uint32_t trace_flags,
+                           std::uint8_t audio_buffer_length, vds::Logger &logger,
                            bool &epoll_dirty) {
   for (auto &controller : controllers) {
     if (!controller.backend) {
@@ -2086,7 +2089,7 @@ void flush_pending_outputs(std::vector<VirtualPort> &ports,
       }
       enqueue_speaker_waveout_chunk(port, trace_flags, logger);
       (void)flush_pending_audio_chunk(port, *controller.backend, trace_flags,
-                                      logger);
+                                      audio_buffer_length, logger);
     } catch (const vds::BluetoothLinkError &error) {
       drop_bt_backend(controller, ports[*port_index], error.what(), logger);
       epoll_dirty = true;
@@ -2279,7 +2282,9 @@ bool control_peer_allowed(int client_fd) {
 void handle_control_client(int control_fd, std::span<VirtualPort> ports,
                            std::span<ControllerRuntime> controllers,
                            const std::string &db_path,
-                           std::uint32_t &trace_flags, bool &reload_requested,
+                           std::uint32_t &trace_flags,
+                           std::uint8_t &audio_buffer_length,
+                           bool &reload_requested,
                            vds::Logger &logger, unsigned &accept_failures) {
   vds::UniqueFd client_fd(
       ::accept4(control_fd, nullptr, nullptr, SOCK_CLOEXEC | SOCK_NONBLOCK));
@@ -2440,7 +2445,7 @@ void handle_control_client(int control_fd, std::span<VirtualPort> ports,
   reply = vds::handle_vdsd_control_command(
       command, db_path, controller_statuses, port_statuses,
       [] { return vds::list_bluez_controller_targets(); }, trace_flags,
-      reload_requested, logger);
+      audio_buffer_length, reload_requested, logger);
 
   send_reply(reply);
 }
@@ -2558,6 +2563,7 @@ int run_daemon(const Options &options, vds::Logger &logger) {
   std::vector<ControllerRuntime> controllers;
   vds::UniqueFd epoll_fd;
   std::uint32_t trace_flags = 0;
+  std::uint8_t audio_buffer_length = vds::kDefaultAudioBufferLength;
   bool reload_requested = true;
   bool epoll_dirty = true;
   bool first_reload = true;
@@ -2617,8 +2623,8 @@ int run_daemon(const Options &options, vds::Logger &logger) {
                                std::string(std::strerror(errno)));
     }
     if (ready == 0) {
-      flush_pending_outputs(ports, controllers, trace_flags, logger,
-                            epoll_dirty);
+      flush_pending_outputs(ports, controllers, trace_flags,
+                            audio_buffer_length, logger, epoll_dirty);
       continue;
     }
 
@@ -2637,7 +2643,7 @@ int run_daemon(const Options &options, vds::Logger &logger) {
         if ((revents & EPOLLIN) != 0) {
           handle_control_client(control_fd.get(), ports, controllers,
                                 options.db_path, trace_flags,
-                                reload_requested, logger,
+                                audio_buffer_length, reload_requested, logger,
                                 control_accept_failures);
         }
         if ((revents & (EPOLLERR | EPOLLHUP)) != 0) {
@@ -2785,8 +2791,8 @@ int run_daemon(const Options &options, vds::Logger &logger) {
       }
     }
 
-    flush_pending_outputs(ports, controllers, trace_flags, logger,
-                          epoll_dirty);
+    flush_pending_outputs(ports, controllers, trace_flags, audio_buffer_length,
+                          logger, epoll_dirty);
   }
 
   logger.log(vds::LogScope::Daemon, vds::LogLevel::Info, "stopping");

@@ -53,7 +53,7 @@ public:
               .trusted = true,
           }};
         },
-        trace_flags_, reload_requested, logger_);
+        trace_flags_, audio_buffer_length_, reload_requested, logger_);
     return QByteArray::fromStdString(reply);
   }
 
@@ -62,6 +62,7 @@ private:
   std::string db_path_;
   vds::Logger logger_;
   std::uint32_t trace_flags_ = 0;
+  std::uint8_t audio_buffer_length_ = vds::kDefaultAudioBufferLength;
 };
 
 std::string error_of(Daemon &daemon, const QByteArray &request,
