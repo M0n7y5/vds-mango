@@ -43,11 +43,26 @@ void test_eleven_hex_digits_are_rejected() {
   VDS_CHECK_THROWS(vds::normalize_bluetooth_address("aabbccddee0"));
 }
 
+void test_record_without_audio_buffer_uses_the_standard_length() {
+  const vds::ConfigDb db = vds::parse_config_db(
+      "{\"address\":\"aa:bb:cc:dd:ee:01\",\"profile\":\"\",\"ports\":[]}\n");
+  VDS_CHECK_EQ(static_cast<unsigned>(db.controllers.at(0).audio_buffer_length),
+               64u);
+}
+
+void test_unmeasured_audio_buffer_in_a_record_is_rejected() {
+  VDS_CHECK_THROWS(vds::parse_config_db(
+      "{\"address\":\"aa:bb:cc:dd:ee:01\",\"profile\":\"\",\"ports\":[],"
+      "\"audio_buffer\":\"12\"}\n"));
+}
+
 void run_tests() {
   test_one_bad_line_drops_every_controller();
   test_dash_separated_address_normalizes_to_colon_form();
   test_bare_hex_address_normalizes_to_colon_form();
   test_eleven_hex_digits_are_rejected();
+  test_record_without_audio_buffer_uses_the_standard_length();
+  test_unmeasured_audio_buffer_in_a_record_is_rejected();
 }
 
 } // namespace vds::test

@@ -16,6 +16,7 @@
 class QAction;
 class QButtonGroup;
 class QCheckBox;
+class QComboBox;
 class QLabel;
 class QTabWidget;
 class QTableView;
@@ -36,11 +37,10 @@ private:
   void refresh_controllers();
   void refresh_names();
   void refresh_trace();
-  void refresh_audio_buffer();
   void check_bluetooth();
   void show_controllers(std::vector<ControllerStatus> controllers);
   void show_trace(const TraceScopes &scopes);
-  void show_audio_buffer(unsigned length);
+  void show_audio_buffer();
   void show_daemon_error(const QString &error);
   void show_bluetooth_problem(const QString &problem);
   void show_action_error(const QString &title, const QString &error);
@@ -79,6 +79,7 @@ private:
   QCheckBox *trace_input_control_ = nullptr;
   QCheckBox *trace_input_audio_ = nullptr;
   QCheckBox *trace_output_ = nullptr;
+  QComboBox *audio_buffer_controller_ = nullptr;
   QButtonGroup *audio_buffer_choices_ = nullptr;
 };
 

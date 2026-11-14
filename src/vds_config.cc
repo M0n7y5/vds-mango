@@ -57,6 +57,13 @@ std::string serialize_config_db(const vds::ConfigDb &db) {
         "profile", vds::controller_profile_name(controller.profile));
     text += ",";
     text += vds::jsonl_unsigned_array_field("ports", controller.ports);
+    // Left out at the default so a database nobody tuned stays readable by
+    // daemons that predate the key.
+    if (controller.audio_buffer_length != vds::kDefaultAudioBufferLength) {
+      text += ",";
+      text += vds::jsonl_string_field(
+          "audio_buffer", std::to_string(controller.audio_buffer_length));
+    }
     text += "}\n";
   }
   return text;
@@ -87,6 +94,7 @@ vds::ControllerConfig parse_controller_line(const std::string &line,
       "address",
       "profile",
       "ports",
+      "audio_buffer",
   };
   vds::reject_unknown_jsonl_fields(fields, expected, context);
 
@@ -98,6 +106,14 @@ vds::ControllerConfig parse_controller_line(const std::string &line,
       .ports = vds::require_jsonl_unsigned_array(fields, "ports", context),
   };
   validate_ports(config.ports);
+  const bool has_audio_buffer =
+      std::any_of(fields.begin(), fields.end(), [](const auto &field) {
+        return field.key == "audio_buffer";
+      });
+  if (has_audio_buffer) {
+    config.audio_buffer_length = vds::parse_audio_buffer_length(
+        vds::require_jsonl_string(fields, "audio_buffer", context));
+  }
   return config;
 }
 
@@ -175,6 +191,15 @@ std::string normalize_bluetooth_address(std::string_view address) {
     normalized.push_back(digits[i]);
   }
   return normalized;
+}
+
+std::uint8_t parse_audio_buffer_length(std::string_view text) {
+  for (const std::uint8_t length : {16, 24, 32, 64}) {
+    if (text == std::to_string(length)) {
+      return length;
+    }
+  }
+  throw std::runtime_error("audio buffer must be 16, 24, 32 or 64");
 }
 
 ControllerProfile parse_controller_profile(std::string_view profile) {
