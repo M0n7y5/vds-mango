@@ -201,27 +201,43 @@ std::string format_table(std::span<const std::string_view> headers,
   return text;
 }
 
+std::optional<std::string> refusal_of(std::string_view reply) {
+  const std::string_view line = reply.substr(0, reply.find('\n'));
+  if (line.empty()) {
+    return std::nullopt;
+  }
+  const std::vector<JsonlField> fields =
+      parse_jsonl_object(line, kControlReplyContext);
+  for (const JsonlField &field : fields) {
+    if (field.key == "OK" && field.value.is_bool && !field.value.bool_value) {
+      return require_jsonl_string(fields, "error", kControlReplyContext);
+    }
+  }
+  return std::nullopt;
+}
+
+int print_listing(const std::string &reply, bool raw,
+                  std::string (*format_table)(std::string_view)) {
+  if (const std::optional<std::string> error = refusal_of(reply)) {
+    std::cerr << "vdsctl: " << *error << "\n";
+    return 1;
+  }
+  std::cout << (raw ? reply : format_table(reply));
+  return 0;
+}
+
 int run_list_command(int argc, char **argv, const VdsctlPlatform &platform) {
   const bool json = parse_vdsctl_json_flag(argc, argv);
-  const std::string reply = run_vdsctl_list(platform.request_control);
-  if (json || !platform.is_tty()) {
-    std::cout << reply;
-    return 0;
-  }
-  std::cout << format_vdsctl_list_table(reply);
-  return 0;
+  return print_listing(run_vdsctl_list(platform.request_control),
+                       json || !platform.is_tty(), format_vdsctl_list_table);
 }
 
 int run_list_targets_command(int argc, char **argv,
                              const VdsctlPlatform &platform) {
   const bool json = parse_vdsctl_json_flag(argc, argv);
-  const std::string reply = run_vdsctl_list_targets(platform.request_control);
-  if (json || !platform.is_tty()) {
-    std::cout << reply;
-    return 0;
-  }
-  std::cout << format_vdsctl_targets_table(reply);
-  return 0;
+  return print_listing(run_vdsctl_list_targets(platform.request_control),
+                       json || !platform.is_tty(),
+                       format_vdsctl_targets_table);
 }
 
 } // namespace
