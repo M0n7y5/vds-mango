@@ -12,9 +12,11 @@ _is_udev_running() {
 	command -v udevadm >/dev/null 2>&1 && [ -S /run/udev/control ]
 }
 
+# rmmod, not modprobe -r: on upgrade pacman's DKMS hook has already dropped the
+# old module from the index, so modprobe cannot find the loaded module.
 _unload_vds_hcd_module() {
 	if [ -d "/sys/module/$_dkms_name" ]; then
-		modprobe -r "$_dkms_name"
+		rmmod "$_dkms_name"
 	fi
 }
 

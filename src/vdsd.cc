@@ -24,6 +24,7 @@
 #include <fcntl.h>
 #include <grp.h>
 #include <poll.h>
+#include <pwd.h>
 #include <signal.h>
 #include <sys/epoll.h>
 #include <sys/file.h>
@@ -32,6 +33,7 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
+#include <systemd/sd-login.h>
 #include <unistd.h>
 
 #include "uapi/vds.h"
@@ -457,7 +459,7 @@ std::uint32_t resolve_config_profile(const vds::ControllerConfig &controller) {
   throw std::runtime_error("unknown controller profile");
 }
 
-int open_control_socket(const std::string &path, vds::Logger &logger) {
+int open_control_socket(const std::string &path) {
   vds::UniqueFd fd(
       ::socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0));
   if (!fd) {
@@ -479,14 +481,8 @@ int open_control_socket(const std::string &path, vds::Logger &logger) {
     throw std::runtime_error("failed to bind control socket " + path + ": " +
                              std::strerror(error));
   }
-  (void)::chmod(path.c_str(), 0660);
-  if (const struct group *vds_group = ::getgrnam("vds")) {
-    if (::chown(path.c_str(), 0, vds_group->gr_gid) < 0) {
-      logger.log(vds::LogScope::Control, vds::LogLevel::Warn,
-                 "control socket group vds not applied: " +
-                     std::string(std::strerror(errno)));
-    }
-  }
+  // Any local process may connect; control_peer_allowed decides who is served.
+  (void)::chmod(path.c_str(), 0666);
 
   if (::listen(fd.get(), 4) < 0) {
     const int error = errno;
@@ -2246,6 +2242,40 @@ void reconcile_controller_configs(std::vector<VirtualPort> &ports,
   controllers = std::move(next_controllers);
 }
 
+// Root, members of the vds group and users logged in on a local seat may
+// control the daemon. SSH-only users and service accounts are refused.
+bool control_peer_allowed(int client_fd) {
+  ucred peer{};
+  socklen_t length = sizeof(peer);
+  if (::getsockopt(client_fd, SOL_SOCKET, SO_PEERCRED, &peer, &length) < 0) {
+    return false;
+  }
+  if (peer.uid == 0 || ::sd_uid_get_seats(peer.uid, 0, nullptr) > 0) {
+    return true;
+  }
+
+  const group *vds_group = ::getgrnam("vds");
+  if (vds_group == nullptr) {
+    return false;
+  }
+  const gid_t vds_gid = vds_group->gr_gid;
+  if (peer.gid == vds_gid) {
+    return true;
+  }
+  const passwd *user = ::getpwuid(peer.uid);
+  if (user == nullptr) {
+    return false;
+  }
+  int count = 32;
+  std::vector<gid_t> groups(static_cast<std::size_t>(count));
+  if (::getgrouplist(user->pw_name, user->pw_gid, groups.data(), &count) < 0) {
+    groups.resize(static_cast<std::size_t>(count));
+    (void)::getgrouplist(user->pw_name, user->pw_gid, groups.data(), &count);
+  }
+  groups.resize(static_cast<std::size_t>(count));
+  return std::find(groups.begin(), groups.end(), vds_gid) != groups.end();
+}
+
 void handle_control_client(int control_fd, std::span<VirtualPort> ports,
                            std::span<ControllerRuntime> controllers,
                            const std::string &db_path,
@@ -2333,6 +2363,33 @@ void handle_control_client(int control_fd, std::span<VirtualPort> ports,
     return;
   }
 
+  const auto send_reply = [&](const std::string &text) {
+    try {
+      const auto now = Clock::now();
+      const int reply_timeout_ms =
+          now >= deadline
+              ? 0
+              : static_cast<int>(
+                    std::chrono::ceil<std::chrono::milliseconds>(deadline - now)
+                        .count());
+      vds::write_full(client_fd.get(),
+                      std::span(reinterpret_cast<const std::uint8_t *>(
+                                    text.data()),
+                                text.size()),
+                      "control reply", reply_timeout_ms);
+    } catch (const std::exception &error) {
+      logger.log(vds::LogScope::Control, vds::LogLevel::Warn,
+                 std::string("control reply failed: ") + error.what());
+    }
+  };
+
+  if (!control_peer_allowed(client_fd.get())) {
+    send_reply(vds::format_control_error_reply(
+        "permission denied: controlling vdsd needs root, membership in the "
+        "vds group, or a login on this computer's own screen"));
+    return;
+  }
+
   std::string reply;
   const std::string command = trim_command(request);
   std::vector<vds::VdsdControlControllerStatus> controller_statuses;
@@ -2385,23 +2442,7 @@ void handle_control_client(int control_fd, std::span<VirtualPort> ports,
       [] { return vds::list_bluez_controller_targets(); }, trace_flags,
       reload_requested, logger);
 
-  try {
-    const auto now = Clock::now();
-    const int reply_timeout_ms =
-        now >= deadline
-            ? 0
-            : static_cast<int>(
-                  std::chrono::ceil<std::chrono::milliseconds>(deadline - now)
-                      .count());
-    vds::write_full(client_fd.get(),
-                    std::span(reinterpret_cast<const std::uint8_t *>(
-                                  reply.data()),
-                              reply.size()),
-                    "control reply", reply_timeout_ms);
-  } catch (const std::exception &error) {
-    logger.log(vds::LogScope::Control, vds::LogLevel::Warn,
-               std::string("control reply failed: ") + error.what());
-  }
+  send_reply(reply);
 }
 
 std::uint64_t encode_event(EventType type, std::size_t index) {
@@ -2507,7 +2548,7 @@ int run_daemon(const Options &options, vds::Logger &logger) {
 
   const vds::UniqueFd signal_fd = create_signal_fd();
 
-  vds::UniqueFd control_fd(open_control_socket(options.socket, logger));
+  vds::UniqueFd control_fd(open_control_socket(options.socket));
   vds::BtL2capAcceptor bt_acceptor;
   vds::VdsDeviceMonitor vds_monitor;
   logger.log(vds::LogScope::Bluetooth, vds::LogLevel::Info,
