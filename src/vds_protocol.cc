@@ -309,8 +309,10 @@ std::uint8_t scale_light_component(std::uint8_t component,
 struct PcmAudioExtractor::SpeakerEncoder {
   SpeakerEncoder() {
     int error = OPUS_OK;
+    // The default application holds audio back 6.5 ms before encoding, this
+    // one 2.5 ms. Both emit CELT-only frames of the same size at this bitrate.
     encoder = opus_encoder_create(VDS_AUDIO_SAMPLE_RATE, kSpeakerChannels,
-                                  OPUS_APPLICATION_AUDIO, &error);
+                                  OPUS_APPLICATION_RESTRICTED_LOWDELAY, &error);
     if (!encoder || error != OPUS_OK) {
       throw std::runtime_error("opus_encoder_create failed: " +
                                std::string(opus_strerror(error)));
