@@ -96,10 +96,10 @@ connection state, changes which controller model games see and which virtual
 ports a controller may use, removes controllers, and toggles trace logging.
 Setup > Restore Bluetooth input undoes the Bluetooth change.
 
-The Advanced tab sets, per controller, how much audio the controller queues
-before it plays haptics and speaker sound. Smaller values react sooner; too
-small makes the speaker crackle. The choice applies immediately and is saved
-with the controller.
+Edit also sets, per controller, how much audio the controller queues before
+it plays haptics and speaker sound. Smaller values react sooner; too small
+makes the speaker crackle. The choice is saved with the controller and takes
+effect without reconnecting it.
 
 ## Command-line setup
 
