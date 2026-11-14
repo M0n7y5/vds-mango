@@ -138,6 +138,17 @@ QByteArray trace_request(const QString &scope, bool enabled) {
   });
 }
 
+QByteArray audio_buffer_status_request() {
+  return request_line(QJsonObject{{"command", "audio-buffer"}, {"value", ""}});
+}
+
+QByteArray audio_buffer_request(unsigned length) {
+  return request_line(QJsonObject{
+      {"command", "audio-buffer"},
+      {"value", QString::number(length)},
+  });
+}
+
 std::vector<ControllerStatus> parse_list_reply(const QByteArray &reply) {
   std::vector<ControllerStatus> controllers;
   for (const QJsonObject &object : reply_objects(reply)) {
@@ -192,6 +203,10 @@ TraceScopes parse_trace_reply(const QByteArray &reply) {
     }
   }
   return result;
+}
+
+unsigned parse_audio_buffer_reply(const QByteArray &reply) {
+  return require_string(command_reply(reply), "value").toUInt();
 }
 
 } // namespace vds::gui

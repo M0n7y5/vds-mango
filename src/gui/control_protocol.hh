@@ -51,6 +51,8 @@ QByteArray attach_request(const ControllerAssignment &assignment);
 QByteArray detach_request(const QString &address);
 QByteArray trace_status_request();
 QByteArray trace_request(const QString &scope, bool enabled);
+QByteArray audio_buffer_status_request();
+QByteArray audio_buffer_request(unsigned length);
 
 /// The parsers throw std::runtime_error carrying the daemon's own error text
 /// when the reply is {"OK":false,...}, or a description of the malformed reply.
@@ -59,5 +61,6 @@ std::vector<PairedController> parse_list_targets_reply(const QByteArray &reply);
 AttachResult parse_attach_reply(const QByteArray &reply);
 void parse_detach_reply(const QByteArray &reply);
 TraceScopes parse_trace_reply(const QByteArray &reply);
+unsigned parse_audio_buffer_reply(const QByteArray &reply);
 
 } // namespace vds::gui
