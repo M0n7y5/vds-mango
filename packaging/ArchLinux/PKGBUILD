@@ -1,0 +1,37 @@
+# Maintainer: M0n7y5 <17201053+M0n7y5@users.noreply.github.com>
+
+pkgname=vds-mango
+_tag=0.5.0-beta1
+pkgver=${_tag/-/}
+pkgrel=1
+pkgdesc="Bluetooth DualSense as a virtual USB one: haptics, adaptive triggers, speaker and microphone"
+arch=('x86_64')
+url="https://github.com/M0n7y5/vds-mango"
+license=('MIT')
+depends=('bluez' 'bluez-libs' 'dbus' 'dkms' 'gcc-libs' 'glibc' 'kmod' 'make'
+         'opus' 'polkit' 'qt6-base' 'systemd-libs')
+makedepends=('cmake' 'git' 'pkgconf')
+optdepends=('linux-headers: build the kernel module for the linux kernel'
+            'linux-lts-headers: build the kernel module for the linux-lts kernel'
+            'linux-cachyos-headers: build the kernel module for the linux-cachyos kernel'
+            'clang: build the kernel module for kernels built with clang'
+            'pipewire: controller haptics, speaker and microphone'
+            'wireplumber: names and priorities of the controller audio devices'
+            'logrotate: rotate /var/log/vdsd.log')
+conflicts=('vds')
+install=vds-mango.install
+source=("git+${url}.git#tag=${_tag}")
+sha256sums=('SKIP')
+
+build() {
+	cmake -S "$pkgname" -B build \
+		-DCMAKE_BUILD_TYPE=Release \
+		-DCMAKE_INSTALL_PREFIX=/usr \
+		-DINSTALL_SERVICE=OFF
+	cmake --build build
+}
+
+package() {
+	"$pkgname/packaging/ArchLinux/stage.sh" \
+		"$srcdir/$pkgname" "$srcdir/build" "$pkgdir" "$pkgver"
+}
