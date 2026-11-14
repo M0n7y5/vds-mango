@@ -158,8 +158,6 @@ install -Dm0644 "$build_dir/vdsd.service" \
 	"${package_root}/usr/lib/systemd/system/vdsd.service"
 install -Dm0644 "${repo_root}/data/99-vds-dualsense-udev.rules" \
 	"${package_root}/usr/lib/udev/rules.d/99-vds-dualsense-udev.rules"
-install -Dm0755 "${repo_root}/scripts/override-bluetoothd.sh" \
-	"${package_root}/usr/share/vds-mango/override-bluetoothd.sh"
 install -Dm0755 "${repo_root}/scripts/install-service.sh" \
 	"${package_root}/usr/share/vds-mango/install-service.sh"
 install -Dm0755 "${repo_root}/scripts/uninstall-service.sh" \
@@ -173,8 +171,6 @@ install -Dm0644 "${repo_root}/README.md" \
 	"${package_root}/usr/share/doc/vds-mango/README.md"
 install -Dm0644 "${repo_root}/LICENSE" \
 	"${package_root}/usr/share/licenses/vds-mango/LICENSE"
-install -Dm0644 "${repo_root}/data/99-vds-dualsense-wireplumber.conf" \
-	"${package_root}/usr/share/doc/vds-mango/examples/99-vds-dualsense-wireplumber.conf"
 
 installed_size=$(du -sb "$package_root" | awk '{print $1}')
 substitute_template "${script_dir}/PKGINFO.in" "${package_root}/.PKGINFO"

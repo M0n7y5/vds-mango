@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Copyright (C) 2026 M0n7y5 <17201053+M0n7y5@users.noreply.github.com>
 
-#include <algorithm>
-#include <iterator>
 #include <utility>
 
 #include <QAction>
@@ -28,6 +26,8 @@
 
 #include "controller_dialog.hh"
 #include "main_window.hh"
+#include "setup_helper.hh"
+#include "setup_wizard.hh"
 
 namespace vds::gui {
 
@@ -38,21 +38,10 @@ constexpr int kStatusMessageMs = 8000;
 
 } // namespace
 
-MainWindow::MainWindow(const QString &socket_path) : client_(socket_path) {
-  setWindowTitle("Controllers");
+MainWindow::MainWindow(const QString &socket_path)
+    : socket_path_(socket_path), client_(socket_path) {
+  setWindowTitle("vDS Mango");
   resize(900, 460);
-
-  auto *warning_icon = new QLabel(this);
-  warning_icon->setPixmap(
-      style()->standardIcon(QStyle::SP_MessageBoxWarning).pixmap(24, 24));
-  banner_text_ = new QLabel(this);
-  banner_text_->setWordWrap(true);
-  banner_text_->setTextInteractionFlags(Qt::TextSelectableByMouse);
-  banner_ = new QWidget(this);
-  auto *banner_layout = new QHBoxLayout(banner_);
-  banner_layout->addWidget(warning_icon);
-  banner_layout->addWidget(banner_text_, 1);
-  banner_->hide();
 
   tabs_ = new QTabWidget(this);
   tabs_->addTab(build_controllers_page(), "Controllers");
@@ -60,7 +49,7 @@ MainWindow::MainWindow(const QString &socket_path) : client_(socket_path) {
 
   auto *central = new QWidget(this);
   auto *layout = new QVBoxLayout(central);
-  layout->addWidget(banner_);
+  layout->addWidget(build_banner());
   layout->addWidget(tabs_, 1);
   setCentralWidget(central);
 
@@ -72,6 +61,25 @@ MainWindow::MainWindow(const QString &socket_path) : client_(socket_path) {
           [this] { refresh_controllers(); });
   poll_timer_.start(kPollIntervalMs);
   refresh_controllers();
+  check_bluetooth();
+}
+
+QWidget *MainWindow::build_banner() {
+  auto *warning_icon = new QLabel(this);
+  warning_icon->setPixmap(
+      style()->standardIcon(QStyle::SP_MessageBoxWarning).pixmap(24, 24));
+  banner_text_ = new QLabel(this);
+  banner_text_->setWordWrap(true);
+  auto *setup_button = new QPushButton("Set up", this);
+  connect(setup_button, &QPushButton::clicked, this, [this] { open_setup(); });
+
+  banner_ = new QWidget(this);
+  auto *layout = new QHBoxLayout(banner_);
+  layout->addWidget(warning_icon);
+  layout->addWidget(banner_text_, 1);
+  layout->addWidget(setup_button);
+  banner_->hide();
+  return banner_;
 }
 
 QWidget *MainWindow::build_controllers_page() {
@@ -93,8 +101,7 @@ QWidget *MainWindow::build_controllers_page() {
           [this] { edit_controller(); });
 
   empty_hint_ = new QLabel(
-      "No controllers registered yet. Pair a DualSense over Bluetooth, then "
-      "choose Add controller.",
+      "No controllers yet. Choose Add controller to pair and add a DualSense.",
       this);
   empty_hint_->setWordWrap(true);
   empty_hint_->hide();
@@ -143,18 +150,16 @@ QWidget *MainWindow::build_diagnostics_page() {
 }
 
 void MainWindow::build_actions() {
-  add_action_ = new QAction(QIcon::fromTheme("list-add"), "Add controller",
-                            this);
-  edit_action_ =
-      new QAction(QIcon::fromTheme("document-edit"), "Edit", this);
-  remove_action_ =
-      new QAction(QIcon::fromTheme("list-remove"), "Remove", this);
+  auto *add_action =
+      new QAction(QIcon::fromTheme("list-add"), "Add controller", this);
+  edit_action_ = new QAction(QIcon::fromTheme("document-edit"), "Edit", this);
+  remove_action_ = new QAction(QIcon::fromTheme("list-remove"), "Remove", this);
   auto *refresh_action =
       new QAction(QIcon::fromTheme("view-refresh"), "Refresh", this);
   refresh_action->setShortcut(QKeySequence::Refresh);
   remove_action_->setShortcut(QKeySequence::Delete);
 
-  connect(add_action_, &QAction::triggered, this, [this] { add_controller(); });
+  connect(add_action, &QAction::triggered, this, [this] { open_setup(); });
   connect(edit_action_, &QAction::triggered, this,
           [this] { edit_controller(); });
   connect(remove_action_, &QAction::triggered, this,
@@ -163,17 +168,22 @@ void MainWindow::build_actions() {
     refresh_controllers();
     refresh_names();
     refresh_trace();
+    check_bluetooth();
   });
 
   auto *toolbar = addToolBar("Controllers");
   toolbar->setMovable(false);
   toolbar->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
-  toolbar->addAction(add_action_);
+  toolbar->addAction(add_action);
   toolbar->addAction(edit_action_);
   toolbar->addAction(remove_action_);
   toolbar->addSeparator();
   toolbar->addAction(refresh_action);
 
+  auto *setup_menu = menuBar()->addMenu("Setup");
+  setup_menu->addAction("Run setup…", this, [this] { open_setup(); });
+  setup_menu->addAction("Restore Bluetooth input…", this,
+                        [this] { restore_bluetooth_input(); });
   auto *help_menu = menuBar()->addMenu("Help");
   help_menu->addAction("About vDS Mango", this, [this] { show_about(); });
 }
@@ -187,9 +197,8 @@ void MainWindow::refresh_controllers() {
       list_request(),
       [this](const QByteArray &reply) {
         list_pending_ = false;
-        std::vector<ControllerStatus> controllers = parse_list_reply(reply);
+        show_controllers(parse_list_reply(reply));
         show_daemon_error({});
-        show_controllers(std::move(controllers));
       },
       [this](const QString &error) {
         list_pending_ = false;
@@ -217,6 +226,17 @@ void MainWindow::refresh_trace() {
       [](const QString &) {});
 }
 
+void MainWindow::check_bluetooth() {
+  bluez_.query_input_plugin(
+      [this](bool enabled) {
+        show_bluetooth_problem(
+            enabled ? "Bluetooth still connects controllers as plain "
+                      "gamepads, so they cannot reach vDS Mango."
+                    : QString());
+      },
+      [this](const QString &error) { show_bluetooth_problem(error); });
+}
+
 void MainWindow::show_controllers(std::vector<ControllerStatus> controllers) {
   const QString selected = selected_address();
   model_.set_controllers(std::move(controllers));
@@ -227,7 +247,6 @@ void MainWindow::show_controllers(std::vector<ControllerStatus> controllers) {
     }
   }
   empty_hint_->setVisible(model_.rowCount() == 0);
-  update_actions();
 }
 
 void MainWindow::show_trace(const TraceScopes &scopes) {
@@ -237,31 +256,57 @@ void MainWindow::show_trace(const TraceScopes &scopes) {
 }
 
 void MainWindow::show_daemon_error(const QString &error) {
-  const bool reachable = error.isEmpty();
-  banner_text_->setText(error);
-  banner_->setVisible(!reachable);
-  tabs_->setEnabled(reachable);
-  if (!reachable) {
+  const bool became_reachable =
+      error.isEmpty() && (!daemon_known_ || !daemon_error_.isEmpty());
+  daemon_known_ = true;
+  daemon_error_ = error;
+  tabs_->setEnabled(error.isEmpty());
+  if (!error.isEmpty()) {
     empty_hint_->hide();
   }
-  if (reachable && !daemon_reachable_) {
-    daemon_reachable_ = true;
+  if (became_reachable) {
     refresh_names();
     refresh_trace();
   }
-  daemon_reachable_ = reachable;
+  update_banner();
   update_actions();
+  offer_setup_once();
+}
+
+void MainWindow::show_bluetooth_problem(const QString &problem) {
+  bluetooth_known_ = true;
+  bluetooth_problem_ = problem;
+  update_banner();
+  offer_setup_once();
 }
 
 void MainWindow::show_action_error(const QString &title, const QString &error) {
   QMessageBox::warning(this, title, error);
 }
 
+void MainWindow::update_banner() {
+  const QString &text =
+      daemon_error_.isEmpty() ? bluetooth_problem_ : daemon_error_;
+  banner_text_->setText(text);
+  banner_->setVisible(!text.isEmpty());
+}
+
 void MainWindow::update_actions() {
-  const bool selected = !selected_address().isEmpty();
-  add_action_->setEnabled(daemon_reachable_);
-  edit_action_->setEnabled(daemon_reachable_ && selected);
-  remove_action_->setEnabled(daemon_reachable_ && selected);
+  const bool editable = daemon_error_.isEmpty() && !selected_address().isEmpty();
+  edit_action_->setEnabled(editable);
+  remove_action_->setEnabled(editable);
+}
+
+void MainWindow::offer_setup_once() {
+  if (setup_offered_ || !daemon_known_ || !bluetooth_known_) {
+    return;
+  }
+  setup_offered_ = true;
+  if (!daemon_error_.isEmpty() || !bluetooth_problem_.isEmpty() ||
+      model_.rowCount() == 0) {
+    // Queued so the dialog's event loop does not run inside a reply handler.
+    QTimer::singleShot(0, this, [this] { open_setup(); });
+  }
 }
 
 QString MainWindow::selected_address() const {
@@ -270,40 +315,42 @@ QString MainWindow::selected_address() const {
                         : model_.controller(rows.first().row()).address;
 }
 
-void MainWindow::add_controller() {
-  client_.send(
-      list_targets_request(),
-      [this](const QByteArray &reply) {
-        const std::vector<PairedController> targets =
-            parse_list_targets_reply(reply);
-        std::vector<PairedController> candidates;
-        std::copy_if(targets.begin(), targets.end(),
-                     std::back_inserter(candidates),
-                     [](const PairedController &target) {
-                       return !target.registered;
-                     });
-        if (candidates.empty()) {
-          QMessageBox::information(
-              this, "Add controller",
-              "There is no paired controller left to add.\n\nPair and trust "
-              "a DualSense first: hold Create and PS until the light bar "
-              "blinks rapidly, then pair it in your Bluetooth settings or "
-              "with bluetoothctl.");
-          return;
-        }
-        ControllerDialog dialog(std::move(candidates), this);
-        if (dialog.exec() == QDialog::Accepted) {
-          apply_assignment(dialog.assignment());
-        }
-      },
-      [this](const QString &error) {
-        show_action_error("Add controller", error);
-      });
+void MainWindow::open_setup() {
+  SetupWizard wizard(
+      socket_path_, !daemon_error_.isEmpty() || !bluetooth_problem_.isEmpty(),
+      this);
+  wizard.exec();
+  refresh_controllers();
+  refresh_names();
+  check_bluetooth();
+}
+
+void MainWindow::restore_bluetooth_input() {
+  QMessageBox confirm(
+      QMessageBox::Question, "Restore Bluetooth input",
+      "Bluetooth will handle classic keyboards, mice and gamepads itself "
+      "again.\n\nDualSense controllers then connect as plain Bluetooth "
+      "gamepads and no longer reach vDS Mango until you run setup again. "
+      "Bluetooth restarts, so connected devices drop for a few seconds.",
+      QMessageBox::Cancel, this);
+  const QPushButton *restore_button =
+      confirm.addButton("Restore", QMessageBox::AcceptRole);
+  confirm.setDefaultButton(QMessageBox::Cancel);
+  confirm.exec();
+  if (confirm.clickedButton() != restore_button) {
+    return;
+  }
+  run_setup_helper(this, {kEnableBluetoothInput}, [this](const QString &error) {
+    if (!error.isEmpty()) {
+      show_action_error("Restore Bluetooth input", error);
+    }
+    check_bluetooth();
+  });
 }
 
 void MainWindow::edit_controller() {
   const int row = model_.row_of(selected_address());
-  if (row < 0 || !daemon_reachable_) {
+  if (row < 0 || !daemon_error_.isEmpty()) {
     return;
   }
   const ControllerStatus controller = model_.controller(row);
@@ -347,24 +394,9 @@ void MainWindow::apply_assignment(const ControllerAssignment &assignment) {
   client_.send(
       attach_request(assignment),
       [this, address = assignment.address](const QByteArray &reply) {
-        const AttachResult result = parse_attach_reply(reply);
+        (void)parse_attach_reply(reply);
         refresh_controllers();
-        refresh_names();
-        if (!result.trusted) {
-          QMessageBox::warning(
-              this, "Controller is not trusted",
-              "Saved, but " + address +
-                  " is not trusted in BlueZ and will not reconnect on its "
-                  "own. Run \"trust " +
-                  address + "\" in bluetoothctl.");
-          return;
-        }
-        statusBar()->showMessage(
-            result.online
-                ? "Saved " + address + "."
-                : "Saved " + address +
-                      ". Press the PS button on the controller to connect.",
-            kStatusMessageMs);
+        statusBar()->showMessage("Saved " + address + ".", kStatusMessageMs);
       },
       [this](const QString &error) {
         show_action_error("Save controller", error);

@@ -1,4 +1,6 @@
-if(NOT DEFINED VDS_SOURCE_DIR OR NOT DEFINED VDS_BUILD_INFO_HEADER)
+if(NOT DEFINED VDS_SOURCE_DIR
+   OR NOT DEFINED VDS_BUILD_INFO_HEADER
+   OR NOT DEFINED VDS_SETUP_HELPER)
   message(FATAL_ERROR "missing vDS build info arguments")
 endif()
 
@@ -20,7 +22,8 @@ file(
   "#pragma once\n\n"
   "namespace vds {\n\n"
   "inline constexpr const char *kVersion = \"${VDS_VERSION}\";\n"
-  "inline constexpr const char *kBuildYear = \"${VDS_BUILD_YEAR}\";\n\n"
+  "inline constexpr const char *kBuildYear = \"${VDS_BUILD_YEAR}\";\n"
+  "inline constexpr const char *kSetupHelperPath = \"${VDS_SETUP_HELPER}\";\n\n"
   "} // namespace vds\n")
 execute_process(COMMAND "${CMAKE_COMMAND}" -E copy_if_different
                         "${VDS_BUILD_INFO_TMP}" "${VDS_BUILD_INFO_HEADER}")
