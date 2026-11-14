@@ -171,8 +171,6 @@ install -Dm0644 "${repo_root}/README.md" \
 	"${package_root}/usr/share/doc/vds-mango/README.md"
 install -Dm0644 "${repo_root}/LICENSE" \
 	"${package_root}/usr/share/licenses/vds-mango/LICENSE"
-install -Dm0644 "${repo_root}/data/99-vds-dualsense-wireplumber.conf" \
-	"${package_root}/usr/share/doc/vds-mango/examples/99-vds-dualsense-wireplumber.conf"
 
 installed_size=$(du -sb "$package_root" | awk '{print $1}')
 substitute_template "${script_dir}/PKGINFO.in" "${package_root}/.PKGINFO"

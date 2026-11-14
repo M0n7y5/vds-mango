@@ -226,6 +226,7 @@ set(VDS_INSTALLED_FILES
     "${CMAKE_INSTALL_FULL_DATADIR}/polkit-1/actions/io.github.m0n7y5.vds-mango.policy"
     "${CMAKE_INSTALL_FULL_DATADIR}/vds-mango/setup-helper.sh"
     "${CMAKE_INSTALL_FULL_DATADIR}/vds-mango/override-bluetoothd.sh"
+    "${CMAKE_INSTALL_FULL_DATADIR}/wireplumber/wireplumber.conf.d/99-vds-dualsense-wireplumber.conf"
 )
 set(VDS_INSTALL_SERVICE_SCRIPT
     ${CMAKE_CURRENT_SOURCE_DIR}/scripts/install-service.sh)
@@ -274,6 +275,8 @@ install(FILES ${VDS_POLKIT_POLICY}
         DESTINATION ${CMAKE_INSTALL_DATADIR}/polkit-1/actions)
 install(PROGRAMS scripts/setup-helper.sh scripts/override-bluetoothd.sh
         DESTINATION ${CMAKE_INSTALL_DATADIR}/vds-mango)
+install(FILES data/99-vds-dualsense-wireplumber.conf
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/wireplumber/wireplumber.conf.d)
 
 if(INSTALL_SERVICE)
   install(FILES ${VDS_SYSTEMD_SERVICE_FILE}
