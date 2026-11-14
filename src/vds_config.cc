@@ -106,11 +106,7 @@ vds::ControllerConfig parse_controller_line(const std::string &line,
       .ports = vds::require_jsonl_unsigned_array(fields, "ports", context),
   };
   validate_ports(config.ports);
-  const bool has_audio_buffer =
-      std::any_of(fields.begin(), fields.end(), [](const auto &field) {
-        return field.key == "audio_buffer";
-      });
-  if (has_audio_buffer) {
+  if (vds::has_jsonl_field(fields, "audio_buffer")) {
     config.audio_buffer_length = vds::parse_audio_buffer_length(
         vds::require_jsonl_string(fields, "audio_buffer", context));
   }

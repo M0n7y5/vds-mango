@@ -1,14 +1,11 @@
 // SPDX-License-Identifier: MIT
 // Copyright (C) 2026 M0n7y5 <17201053+M0n7y5@users.noreply.github.com>
 
-#include <algorithm>
 #include <utility>
 
 #include <QAction>
 #include <QApplication>
-#include <QButtonGroup>
 #include <QCheckBox>
-#include <QComboBox>
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QHash>
@@ -20,8 +17,6 @@
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QPushButton>
-#include <QRadioButton>
-#include <QSignalBlocker>
 #include <QStatusBar>
 #include <QStyle>
 #include <QTabWidget>
@@ -51,7 +46,6 @@ MainWindow::MainWindow(const QString &socket_path)
   tabs_ = new QTabWidget(this);
   tabs_->addTab(build_controllers_page(), "Controllers");
   tabs_->addTab(build_diagnostics_page(), "Diagnostics");
-  tabs_->addTab(build_advanced_page(), "Advanced");
 
   auto *central = new QWidget(this);
   auto *layout = new QVBoxLayout(central);
@@ -185,61 +179,6 @@ QWidget *MainWindow::build_diagnostics_page() {
   return page;
 }
 
-QWidget *MainWindow::build_advanced_page() {
-  auto *intro = new QLabel(
-      "How much audio the controller queues before it plays haptics and "
-      "speaker sound. Lower values react sooner, but too little makes the "
-      "sound crackle, especially farther from the computer. A change applies "
-      "at once and is saved for that controller. The delays were measured on "
-      "one DualSense lying next to the computer.",
-      this);
-  intro->setWordWrap(true);
-
-  audio_buffer_controller_ = new QComboBox(this);
-  audio_buffer_controller_->setPlaceholderText("No controllers yet");
-  connect(audio_buffer_controller_, &QComboBox::currentIndexChanged, this,
-          [this] { show_audio_buffer(); });
-
-  const std::pair<unsigned, const char *> choices[] = {
-      {64, "Standard: about 78 ms, safest"},
-      {32, "Reduced: about 50 ms"},
-      {24, "Low: about 45 ms"},
-      {16, "Lowest: about 33 ms, the speaker may crackle"},
-  };
-
-  auto *group = new QGroupBox("Haptics and speaker delay", this);
-  auto *group_layout = new QVBoxLayout(group);
-  group_layout->addWidget(intro);
-  group_layout->addWidget(audio_buffer_controller_);
-  audio_buffer_choices_ = new QButtonGroup(this);
-  for (const auto &[length, label] : choices) {
-    auto *choice = new QRadioButton(label, this);
-    audio_buffer_choices_->addButton(choice, static_cast<int>(length));
-    group_layout->addWidget(choice);
-  }
-  connect(audio_buffer_choices_, &QButtonGroup::idClicked, this,
-          [this](int length) {
-            client_.send(
-                audio_buffer_request(
-                    audio_buffer_controller_->currentData().toString(),
-                    static_cast<unsigned>(length)),
-                [this](const QByteArray &reply) {
-                  parse_audio_buffer_reply(reply);
-                  refresh_controllers();
-                },
-                [this](const QString &error) {
-                  show_action_error("Haptics and speaker delay", error);
-                  show_audio_buffer();
-                });
-          });
-
-  auto *page = new QWidget(this);
-  auto *layout = new QVBoxLayout(page);
-  layout->addWidget(group);
-  layout->addStretch(1);
-  return page;
-}
-
 void MainWindow::build_menus() {
   auto *setup_menu = menuBar()->addMenu("Setup");
   setup_menu->addAction("Run setup…", this, [this] { open_setup(); });
@@ -276,7 +215,6 @@ void MainWindow::refresh_names() {
           names.insert(target.address, target.name);
         }
         model_.set_names(std::move(names));
-        show_audio_buffer();
       },
       [](const QString &) {});
 }
@@ -309,47 +247,12 @@ void MainWindow::show_controllers(std::vector<ControllerStatus> controllers) {
     }
   }
   empty_hint_->setVisible(model_.rowCount() == 0);
-  show_audio_buffer();
 }
 
 void MainWindow::show_trace(const TraceScopes &scopes) {
   trace_input_control_->setChecked(scopes.input_control);
   trace_input_audio_->setChecked(scopes.input_audio);
   trace_output_->setChecked(scopes.output);
-}
-
-void MainWindow::show_audio_buffer() {
-  QComboBox *box = audio_buffer_controller_;
-  const auto label = [this](int row) {
-    const QString &address = model_.controller(row).address;
-    return model_.name(address) + " (" + address + ")";
-  };
-  bool listed = box->count() == model_.rowCount();
-  for (int row = 0; listed && row < model_.rowCount(); ++row) {
-    listed = box->itemData(row).toString() == model_.controller(row).address &&
-             box->itemText(row) == label(row);
-  }
-  if (!listed) {
-    const QString selected = box->currentData().toString();
-    const QSignalBlocker blocker(box);
-    box->clear();
-    for (int row = 0; row < model_.rowCount(); ++row) {
-      box->addItem(label(row), model_.controller(row).address);
-    }
-    box->setCurrentIndex(std::max(0, box->findData(selected)));
-  }
-
-  const int row = model_.row_of(box->currentData().toString());
-  for (QAbstractButton *choice : audio_buffer_choices_->buttons()) {
-    choice->setEnabled(row >= 0);
-  }
-  if (row < 0) {
-    return;
-  }
-  if (QAbstractButton *choice = audio_buffer_choices_->button(
-          static_cast<int>(model_.controller(row).audio_buffer))) {
-    choice->setChecked(true);
-  }
 }
 
 void MainWindow::show_daemon_error(const QString &error) {

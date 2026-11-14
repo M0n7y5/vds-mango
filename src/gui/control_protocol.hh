@@ -2,6 +2,7 @@
 // Copyright (C) 2026 M0n7y5 <17201053+M0n7y5@users.noreply.github.com>
 #pragma once
 
+#include <optional>
 #include <vector>
 
 #include <QByteArray>
@@ -33,6 +34,8 @@ struct ControllerAssignment {
   QString address;
   ControllerProfile profile = ControllerProfile::Unspecified;
   std::vector<unsigned> ports;
+  /// Unset leaves the controller's saved haptics and speaker delay alone.
+  std::optional<unsigned> audio_buffer = std::nullopt;
 };
 
 struct AttachResult {
@@ -52,7 +55,6 @@ QByteArray attach_request(const ControllerAssignment &assignment);
 QByteArray detach_request(const QString &address);
 QByteArray trace_status_request();
 QByteArray trace_request(const QString &scope, bool enabled);
-QByteArray audio_buffer_request(const QString &address, unsigned length);
 
 /// The parsers throw std::runtime_error carrying the daemon's own error text
 /// when the reply is {"OK":false,...}, or a description of the malformed reply.
@@ -61,6 +63,5 @@ std::vector<PairedController> parse_list_targets_reply(const QByteArray &reply);
 AttachResult parse_attach_reply(const QByteArray &reply);
 void parse_detach_reply(const QByteArray &reply);
 TraceScopes parse_trace_reply(const QByteArray &reply);
-void parse_audio_buffer_reply(const QByteArray &reply);
 
 } // namespace vds::gui

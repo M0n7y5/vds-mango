@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <utility>
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -27,6 +28,13 @@ constexpr ControllerProfile kProfiles[] = {
     ControllerProfile::Dse,
 };
 
+constexpr std::pair<unsigned, const char *> kDelays[] = {
+    {64, "Standard: about 78 ms, safest"},
+    {32, "Reduced: about 50 ms"},
+    {24, "Low: about 45 ms"},
+    {16, "Lowest: about 33 ms, the speaker may crackle"},
+};
+
 } // namespace
 
 ControllerDialog::ControllerDialog(const ControllerStatus &controller,
@@ -45,6 +53,18 @@ ControllerDialog::ControllerDialog(const ControllerStatus &controller,
   profile_box_->setToolTip(
       "Which USB controller games see. Automatic matches the physical "
       "controller. Pick a model when a game supports only one of the two.");
+
+  delay_box_ = new QComboBox(this);
+  for (const auto &[length, label] : kDelays) {
+    delay_box_->addItem(label, length);
+  }
+  delay_box_->setCurrentIndex(
+      std::max(0, delay_box_->findData(controller.audio_buffer)));
+  delay_box_->setToolTip(
+      "How much audio the controller queues before it plays haptics and "
+      "speaker sound. Lower values react sooner, but too little makes the "
+      "sound crackle, especially farther from the computer. The delays were "
+      "measured on one DualSense lying next to the computer.");
 
   auto *any_port = new QRadioButton("Any free port", this);
   chosen_ports_ = new QRadioButton("Only:", this);
@@ -74,6 +94,7 @@ ControllerDialog::ControllerDialog(const ControllerStatus &controller,
                new QLabel(name + " (" + controller.address + ")", this));
   form->addRow("Appears as:", profile_box_);
   form->addRow("Virtual port:", ports_row);
+  form->addRow("Haptics and speaker delay:", delay_box_);
 
   auto *buttons = new QDialogButtonBox(
       QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
@@ -108,6 +129,7 @@ ControllerAssignment ControllerDialog::assignment() const {
       .profile =
           kProfiles[static_cast<std::size_t>(profile_box_->currentIndex())],
       .ports = {},
+      .audio_buffer = delay_box_->currentData().toUInt(),
   };
   if (chosen_ports_->isChecked()) {
     for (std::size_t port = 0; port < port_boxes_.size(); ++port) {

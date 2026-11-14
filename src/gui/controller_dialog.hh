@@ -16,8 +16,8 @@ class QRadioButton;
 
 namespace vds::gui {
 
-/// Changes which controller model games see and which virtual ports a
-/// registered controller may use.
+/// Changes which controller model games see, which virtual ports a
+/// registered controller may use, and its haptics and speaker delay.
 class ControllerDialog : public QDialog {
 public:
   ControllerDialog(const ControllerStatus &controller, const QString &name,
@@ -30,6 +30,7 @@ private:
 
   QString address_;
   QComboBox *profile_box_ = nullptr;
+  QComboBox *delay_box_ = nullptr;
   QRadioButton *chosen_ports_ = nullptr;
   std::array<QCheckBox *, kMaxPortCount> port_boxes_{};
   QPushButton *accept_button_ = nullptr;

@@ -322,8 +322,8 @@ std::string format_control_attach_reply(bool ok, std::string_view error,
   return reply;
 }
 
-std::string format_control_address_reply(bool ok, std::string_view error,
-                                         std::string_view address) {
+std::string format_control_detach_reply(bool ok, std::string_view error,
+                                        std::string_view address) {
   std::string reply = "{";
   reply += jsonl_bool_field("OK", ok);
   reply += ',';
@@ -380,6 +380,7 @@ std::string handle_attach_control_request(
   bool online = false;
   bool trusted = false;
   bool updated = false;
+  const bool has_audio_buffer = has_jsonl_field(fields, "audio_buffer");
   try {
     const std::string address = normalize_bluetooth_address(
         require_jsonl_string(fields, "address", context));
@@ -389,6 +390,7 @@ std::string handle_attach_control_request(
         "address",
         "profile",
         "ports",
+        "audio_buffer",
     };
     reject_unknown_jsonl_fields(fields, expected, context);
 
@@ -396,6 +398,10 @@ std::string handle_attach_control_request(
     config.profile = parse_controller_profile(
         require_jsonl_string(fields, "profile", context));
     config.ports = require_jsonl_unsigned_array(fields, "ports", context);
+    if (has_audio_buffer) {
+      config.audio_buffer_length = parse_audio_buffer_length(
+          require_jsonl_string(fields, "audio_buffer", context));
+    }
 
     const std::vector<ControllerTarget> targets = list_targets();
     const ControllerTarget *target =
@@ -417,7 +423,7 @@ std::string handle_attach_control_request(
       const ControllerConfig *existing =
           find_controller_config_by_address(db, config.address);
       updated = existing != nullptr;
-      if (existing != nullptr) {
+      if (existing != nullptr && !has_audio_buffer) {
         config.audio_buffer_length = existing->audio_buffer_length;
       }
       upsert_controller_config(db, config);
@@ -458,14 +464,14 @@ std::string handle_detach_control_request(std::span<const JsonlField> fields,
     reject_unknown_jsonl_fields(fields, expected, context);
 
     if (address.empty()) {
-      return format_control_address_reply(false, "address is not registered",
-                                          address);
+      return format_control_detach_reply(false, "address is not registered",
+                                         address);
     }
     update_config_db(db_path, [&](ConfigDb &db) {
       removed = remove_controller_config(db, address);
     });
   } catch (const std::exception &error) {
-    return format_control_address_reply(false, error.what(), address);
+    return format_control_detach_reply(false, error.what(), address);
   }
   reload_requested = removed;
   logger.log(vds::LogScope::Control, LogLevel::Info,
@@ -473,10 +479,9 @@ std::string handle_detach_control_request(std::span<const JsonlField> fields,
 
   if (!removed) {
     address = {};
-    return format_control_address_reply(false, "address is not registered",
-                                        "");
+    return format_control_detach_reply(false, "address is not registered", "");
   }
-  return format_control_address_reply(true, "", address);
+  return format_control_detach_reply(true, "", address);
 }
 
 std::string handle_list_control_request(
@@ -540,48 +545,6 @@ std::string handle_trace_control_request(std::span<const JsonlField> fields,
   return format_control_trace_reply(true, "", trace_flags);
 }
 
-std::string handle_audio_buffer_control_request(
-    std::span<const JsonlField> fields, const std::string &db_path,
-    bool &reload_requested, Logger &logger) {
-  constexpr std::string_view context = "control request";
-  std::string address;
-  std::uint8_t length = kDefaultAudioBufferLength;
-  bool registered = false;
-  try {
-    static constexpr std::string_view expected[] = {
-        "command",
-        "address",
-        "value",
-    };
-    reject_unknown_jsonl_fields(fields, expected, context);
-
-    address = normalize_bluetooth_address(
-        require_jsonl_string(fields, "address", context));
-    length = parse_audio_buffer_length(
-        require_jsonl_string(fields, "value", context));
-    update_config_db(db_path, [&](ConfigDb &db) {
-      for (auto &controller : db.controllers) {
-        if (controller.address == address) {
-          controller.audio_buffer_length = length;
-          registered = true;
-        }
-      }
-    });
-  } catch (const std::exception &error) {
-    return format_control_address_reply(false, error.what(), address);
-  }
-  if (!registered) {
-    return format_control_address_reply(false, "address is not registered",
-                                        "");
-  }
-
-  reload_requested = true;
-  logger.log(vds::LogScope::Control, LogLevel::Info,
-             "controller audio buffer set to " + std::to_string(length) +
-                 " address=" + address);
-  return format_control_address_reply(true, "", address);
-}
-
 std::string handle_vdsd_control_command(
     std::string_view request, const std::string &db_path,
     std::span<const VdsdControlControllerStatus> controllers,
@@ -609,10 +572,6 @@ std::string handle_vdsd_control_command(
     }
     if (command == "trace") {
       return handle_trace_control_request(fields, trace_flags, logger);
-    }
-    if (command == "audio-buffer") {
-      return handle_audio_buffer_control_request(fields, db_path,
-                                                 reload_requested, logger);
     }
 
     logger.log(vds::LogScope::Control, LogLevel::Warn,

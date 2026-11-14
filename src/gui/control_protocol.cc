@@ -112,13 +112,17 @@ QByteArray attach_request(const ControllerAssignment &assignment) {
   for (const unsigned port : assignment.ports) {
     ports.append(static_cast<int>(port));
   }
-  return request_line(QJsonObject{
+  QJsonObject request{
       {"command", "attach"},
       {"address", assignment.address},
       {"profile", QString::fromStdString(
                       controller_profile_name(assignment.profile))},
       {"ports", ports},
-  });
+  };
+  if (assignment.audio_buffer) {
+    request.insert("audio_buffer", QString::number(*assignment.audio_buffer));
+  }
+  return request_line(request);
 }
 
 QByteArray detach_request(const QString &address) {
@@ -135,14 +139,6 @@ QByteArray trace_request(const QString &scope, bool enabled) {
       {"command", "trace"},
       {"mode", enabled ? "on" : "off"},
       {"scope", scope},
-  });
-}
-
-QByteArray audio_buffer_request(const QString &address, unsigned length) {
-  return request_line(QJsonObject{
-      {"command", "audio-buffer"},
-      {"address", address},
-      {"value", QString::number(length)},
   });
 }
 
@@ -201,10 +197,6 @@ TraceScopes parse_trace_reply(const QByteArray &reply) {
     }
   }
   return result;
-}
-
-void parse_audio_buffer_reply(const QByteArray &reply) {
-  (void)command_reply(reply);
 }
 
 } // namespace vds::gui
