@@ -5,6 +5,7 @@
 
 #include <QAction>
 #include <QApplication>
+#include <QButtonGroup>
 #include <QCheckBox>
 #include <QGroupBox>
 #include <QHBoxLayout>
@@ -17,6 +18,7 @@
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QRadioButton>
 #include <QStatusBar>
 #include <QStyle>
 #include <QTabWidget>
@@ -46,6 +48,7 @@ MainWindow::MainWindow(const QString &socket_path)
   tabs_ = new QTabWidget(this);
   tabs_->addTab(build_controllers_page(), "Controllers");
   tabs_->addTab(build_diagnostics_page(), "Diagnostics");
+  tabs_->addTab(build_advanced_page(), "Advanced");
 
   auto *central = new QWidget(this);
   auto *layout = new QVBoxLayout(central);
@@ -149,6 +152,52 @@ QWidget *MainWindow::build_diagnostics_page() {
   return page;
 }
 
+QWidget *MainWindow::build_advanced_page() {
+  auto *intro = new QLabel(
+      "How much audio the controller queues before it plays haptics and "
+      "speaker sound. Lower values react sooner, but too little makes the "
+      "sound crackle, especially farther from the computer. A change applies "
+      "at once and goes back to Standard when vdsd restarts. The delays were "
+      "measured on one DualSense lying next to the computer.",
+      this);
+  intro->setWordWrap(true);
+
+  const std::pair<unsigned, const char *> choices[] = {
+      {64, "Standard: about 95 ms, safest"},
+      {32, "Reduced: about 61 ms"},
+      {24, "Low: about 59 ms"},
+      {16, "Lowest: about 51 ms, the speaker may crackle"},
+  };
+
+  auto *group = new QGroupBox("Haptics and speaker delay", this);
+  auto *group_layout = new QVBoxLayout(group);
+  group_layout->addWidget(intro);
+  audio_buffer_choices_ = new QButtonGroup(this);
+  for (const auto &[length, label] : choices) {
+    auto *choice = new QRadioButton(label, this);
+    audio_buffer_choices_->addButton(choice, static_cast<int>(length));
+    group_layout->addWidget(choice);
+  }
+  connect(audio_buffer_choices_, &QButtonGroup::idClicked, this,
+          [this](int length) {
+            client_.send(
+                audio_buffer_request(static_cast<unsigned>(length)),
+                [this](const QByteArray &reply) {
+                  show_audio_buffer(parse_audio_buffer_reply(reply));
+                },
+                [this](const QString &error) {
+                  show_action_error("Haptics and speaker delay", error);
+                  refresh_audio_buffer();
+                });
+          });
+
+  auto *page = new QWidget(this);
+  auto *layout = new QVBoxLayout(page);
+  layout->addWidget(group);
+  layout->addStretch(1);
+  return page;
+}
+
 void MainWindow::build_actions() {
   auto *add_action =
       new QAction(QIcon::fromTheme("list-add"), "Add controller", this);
@@ -168,6 +217,7 @@ void MainWindow::build_actions() {
     refresh_controllers();
     refresh_names();
     refresh_trace();
+    refresh_audio_buffer();
     check_bluetooth();
   });
 
@@ -226,6 +276,15 @@ void MainWindow::refresh_trace() {
       [](const QString &) {});
 }
 
+void MainWindow::refresh_audio_buffer() {
+  client_.send(
+      audio_buffer_status_request(),
+      [this](const QByteArray &reply) {
+        show_audio_buffer(parse_audio_buffer_reply(reply));
+      },
+      [](const QString &) {});
+}
+
 void MainWindow::check_bluetooth() {
   bluez_.query_input_plugin(
       [this](bool enabled) {
@@ -255,6 +314,13 @@ void MainWindow::show_trace(const TraceScopes &scopes) {
   trace_output_->setChecked(scopes.output);
 }
 
+void MainWindow::show_audio_buffer(unsigned length) {
+  if (QAbstractButton *choice =
+          audio_buffer_choices_->button(static_cast<int>(length))) {
+    choice->setChecked(true);
+  }
+}
+
 void MainWindow::show_daemon_error(const QString &error) {
   const bool became_reachable =
       error.isEmpty() && (!daemon_known_ || !daemon_error_.isEmpty());
@@ -267,6 +333,7 @@ void MainWindow::show_daemon_error(const QString &error) {
   if (became_reachable) {
     refresh_names();
     refresh_trace();
+    refresh_audio_buffer();
   }
   update_banner();
   update_actions();

@@ -822,7 +822,8 @@ BtReport HapticsPacketBuilder::build_packet(
     std::span<const std::int8_t, kHapticsSampleSize> haptics,
     std::span<const std::uint8_t, kSpeakerOpusSize> speaker,
     std::span<const std::uint8_t, kDsStateSize> state,
-    bool audio_sections_enabled, bool headset_plugged) {
+    bool audio_sections_enabled, bool headset_plugged,
+    std::uint8_t buffer_length) {
   BtReport packet{};
   packet[0] = VDS_BT_HAPTICS_REPORT_ID;
   packet[1] = report_sequence_ << 4;
@@ -835,7 +836,9 @@ BtReport HapticsPacketBuilder::build_packet(
   packet[6] = kBtAudioBufferLength;
   packet[7] = kBtAudioBufferLength;
   packet[8] = kBtAudioBufferLength;
-  packet[9] = kBtAudioBufferLength;
+  // Measured on a DualSense: of these five bytes only this one changes the
+  // delay of haptics and speaker output.
+  packet[9] = buffer_length;
   packet[10] = packet_sequence_++;
   packet[11] = 0x10 | (1 << 7);
   packet[12] = kDsStateSize;

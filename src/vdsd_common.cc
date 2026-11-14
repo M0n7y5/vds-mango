@@ -532,12 +532,64 @@ std::string handle_trace_control_request(std::span<const JsonlField> fields,
   return format_control_trace_reply(true, "", trace_flags);
 }
 
+// Lengths confirmed to play on a DualSense. Other values garbled or muted the
+// output (12, 0), so the daemon refuses anything not measured.
+std::uint8_t parse_audio_buffer_length(std::string_view text) {
+  for (const std::uint8_t length : {16, 24, 32, 64}) {
+    if (text == std::to_string(length)) {
+      return length;
+    }
+  }
+  throw std::runtime_error("audio buffer must be 16, 24, 32 or 64");
+}
+
+std::string format_control_audio_buffer_reply(bool ok, std::string_view error,
+                                              std::uint8_t length) {
+  std::string reply = "{";
+  reply += jsonl_bool_field("OK", ok);
+  reply += ',';
+  reply += jsonl_string_field("error", error);
+  reply += ',';
+  reply += jsonl_string_field("value", std::to_string(length));
+  reply += "}\n";
+  return reply;
+}
+
+std::string
+handle_audio_buffer_control_request(std::span<const JsonlField> fields,
+                                    std::uint8_t &audio_buffer_length,
+                                    Logger &logger) {
+  constexpr std::string_view context = "control request";
+  try {
+    static constexpr std::string_view expected[] = {
+        "command",
+        "value",
+    };
+    reject_unknown_jsonl_fields(fields, expected, context);
+
+    const std::string value = require_jsonl_string(fields, "value", context);
+    if (value.empty()) {
+      return format_control_audio_buffer_reply(true, "", audio_buffer_length);
+    }
+    audio_buffer_length = parse_audio_buffer_length(value);
+  } catch (const std::exception &error) {
+    return format_control_audio_buffer_reply(false, error.what(),
+                                             audio_buffer_length);
+  }
+
+  logger.log(vds::LogScope::Control, LogLevel::Info,
+             "controller audio buffer set to " +
+                 std::to_string(audio_buffer_length));
+  return format_control_audio_buffer_reply(true, "", audio_buffer_length);
+}
+
 std::string handle_vdsd_control_command(
     std::string_view request, const std::string &db_path,
     std::span<const VdsdControlControllerStatus> controllers,
     std::span<const VdsdControlPortStatus> ports,
     const std::function<std::vector<ControllerTarget>()> &list_targets,
-    std::uint32_t &trace_flags, bool &reload_requested, Logger &logger) {
+    std::uint32_t &trace_flags, std::uint8_t &audio_buffer_length,
+    bool &reload_requested, Logger &logger) {
   try {
     constexpr std::string_view context = "control request";
     const std::vector<JsonlField> fields = parse_jsonl_object(request, context);
@@ -559,6 +611,10 @@ std::string handle_vdsd_control_command(
     }
     if (command == "trace") {
       return handle_trace_control_request(fields, trace_flags, logger);
+    }
+    if (command == "audio-buffer") {
+      return handle_audio_buffer_control_request(fields, audio_buffer_length,
+                                                 logger);
     }
 
     logger.log(vds::LogScope::Control, LogLevel::Warn,

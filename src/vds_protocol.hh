@@ -90,11 +90,14 @@ private:
 
 class HapticsPacketBuilder {
 public:
+  /// buffer_length is how much audio the controller queues before it plays
+  /// haptics and speaker sound: lower reacts sooner, too low drops audio.
   BtReport
   build_packet(std::span<const std::int8_t, kHapticsSampleSize> haptics,
                std::span<const std::uint8_t, kSpeakerOpusSize> speaker,
                std::span<const std::uint8_t, kDsStateSize> state,
-               bool audio_sections_enabled, bool headset_plugged);
+               bool audio_sections_enabled, bool headset_plugged,
+               std::uint8_t buffer_length);
 
 private:
   std::uint8_t report_sequence_ = 0;

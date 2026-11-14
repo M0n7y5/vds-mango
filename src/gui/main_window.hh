@@ -14,6 +14,7 @@
 #include "controller_model.hh"
 
 class QAction;
+class QButtonGroup;
 class QCheckBox;
 class QLabel;
 class QTabWidget;
@@ -29,14 +30,17 @@ private:
   QWidget *build_banner();
   QWidget *build_controllers_page();
   QWidget *build_diagnostics_page();
+  QWidget *build_advanced_page();
   void build_actions();
 
   void refresh_controllers();
   void refresh_names();
   void refresh_trace();
+  void refresh_audio_buffer();
   void check_bluetooth();
   void show_controllers(std::vector<ControllerStatus> controllers);
   void show_trace(const TraceScopes &scopes);
+  void show_audio_buffer(unsigned length);
   void show_daemon_error(const QString &error);
   void show_bluetooth_problem(const QString &problem);
   void show_action_error(const QString &title, const QString &error);
@@ -75,6 +79,7 @@ private:
   QCheckBox *trace_input_control_ = nullptr;
   QCheckBox *trace_input_audio_ = nullptr;
   QCheckBox *trace_output_ = nullptr;
+  QButtonGroup *audio_buffer_choices_ = nullptr;
 };
 
 } // namespace vds::gui
