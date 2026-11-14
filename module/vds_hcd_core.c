@@ -86,7 +86,6 @@ struct vds_urb_context {
 	int status;
 	u8 feature_report_id;
 	enum vds_urb_context_state state;
-	bool deliver_iso_out;
 	bool deliver_iso_in;
 };
 
@@ -636,8 +635,6 @@ static int vds_giveback_thread(void *data)
 		urb->hcpriv = NULL;
 		spin_unlock_irqrestore(&dev->lock, flags);
 
-		if (!status && context->deliver_iso_out)
-			status = vds_iso_out_urb(dev, urb);
 		if (!status && context->deliver_iso_in)
 			status = vds_iso_in_urb(dev, urb);
 		usb_hcd_giveback_urb(dev->hcd, urb, status);
@@ -1187,7 +1184,6 @@ static int vds_urb_enqueue(struct usb_hcd *hcd, struct urb *urb,
 	context->ready_time = 0;
 	context->feature_report_id = 0;
 	context->state = VDS_URB_ACTIVE;
-	context->deliver_iso_out = false;
 	context->deliver_iso_in = false;
 	INIT_LIST_HEAD(&context->list);
 
@@ -1229,13 +1225,14 @@ static int vds_urb_enqueue(struct usb_hcd *hcd, struct urb *urb,
 	case PIPE_ISOCHRONOUS:
 		if (!usb_urb_dir_in(urb) &&
 		    vds_usb_device_is_audio_out(&dev->usb, endpoint)) {
-			if (!urb->transfer_buffer) {
-				ret = -EPIPE;
-			} else {
-				ret = 0;
-				timed_iso = true;
-				context->deliver_iso_out = true;
-			}
+			/*
+			 * snd-usb-audio keeps about 15 ms of URBs queued. A
+			 * real port sends them one after another; a virtual
+			 * one has no wire to wait for, so userspace gets the
+			 * PCM now and only the giveback is paced.
+			 */
+			ret = vds_iso_out_urb(dev, urb);
+			timed_iso = !ret;
 		} else if (usb_urb_dir_in(urb) &&
 			   vds_usb_device_is_audio_in(&dev->usb, endpoint)) {
 			if (!urb->transfer_buffer) {
