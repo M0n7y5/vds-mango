@@ -40,7 +40,7 @@ constexpr int kStatusMessageMs = 8000;
 
 MainWindow::MainWindow(const QString &socket_path)
     : socket_path_(socket_path), client_(socket_path) {
-  setWindowTitle("Controllers");
+  setWindowTitle("vDS Mango");
   resize(900, 460);
 
   tabs_ = new QTabWidget(this);

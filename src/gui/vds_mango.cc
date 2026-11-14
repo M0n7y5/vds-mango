@@ -22,7 +22,6 @@ int main(int argc, char **argv) {
   try {
     QApplication app(argc, argv);
     QApplication::setApplicationName("vds-mango");
-    QApplication::setApplicationDisplayName("vDS Mango");
     QApplication::setApplicationVersion(vds::kVersion);
     QApplication::setDesktopFileName("vds-mango");
     QApplication::setWindowIcon(QIcon::fromTheme("input-gaming"));
