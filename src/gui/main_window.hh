@@ -31,7 +31,7 @@ private:
   QWidget *build_controllers_page();
   QWidget *build_diagnostics_page();
   QWidget *build_advanced_page();
-  void build_actions();
+  void build_menus();
 
   void refresh_controllers();
   void refresh_names();

@@ -56,7 +56,7 @@ MainWindow::MainWindow(const QString &socket_path)
   layout->addWidget(tabs_, 1);
   setCentralWidget(central);
 
-  build_actions();
+  build_menus();
   update_actions();
   statusBar();
 
@@ -86,6 +86,36 @@ QWidget *MainWindow::build_banner() {
 }
 
 QWidget *MainWindow::build_controllers_page() {
+  auto *add_action =
+      new QAction(QIcon::fromTheme("list-add"), "Add controller", this);
+  edit_action_ = new QAction(QIcon::fromTheme("document-edit"), "Edit", this);
+  remove_action_ = new QAction(QIcon::fromTheme("list-remove"), "Remove", this);
+  auto *refresh_action =
+      new QAction(QIcon::fromTheme("view-refresh"), "Refresh", this);
+  refresh_action->setShortcut(QKeySequence::Refresh);
+  remove_action_->setShortcut(QKeySequence::Delete);
+
+  connect(add_action, &QAction::triggered, this, [this] { open_setup(); });
+  connect(edit_action_, &QAction::triggered, this,
+          [this] { edit_controller(); });
+  connect(remove_action_, &QAction::triggered, this,
+          [this] { remove_controller(); });
+  connect(refresh_action, &QAction::triggered, this, [this] {
+    refresh_controllers();
+    refresh_names();
+    refresh_trace();
+    refresh_audio_buffer();
+    check_bluetooth();
+  });
+
+  auto *toolbar = new QToolBar(this);
+  toolbar->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+  toolbar->addAction(add_action);
+  toolbar->addAction(edit_action_);
+  toolbar->addAction(remove_action_);
+  toolbar->addSeparator();
+  toolbar->addAction(refresh_action);
+
   table_ = new QTableView(this);
   table_->setModel(&model_);
   table_->setSelectionBehavior(QAbstractItemView::SelectRows);
@@ -111,6 +141,7 @@ QWidget *MainWindow::build_controllers_page() {
 
   auto *page = new QWidget(this);
   auto *layout = new QVBoxLayout(page);
+  layout->addWidget(toolbar);
   layout->addWidget(table_, 1);
   layout->addWidget(empty_hint_);
   return page;
@@ -198,38 +229,7 @@ QWidget *MainWindow::build_advanced_page() {
   return page;
 }
 
-void MainWindow::build_actions() {
-  auto *add_action =
-      new QAction(QIcon::fromTheme("list-add"), "Add controller", this);
-  edit_action_ = new QAction(QIcon::fromTheme("document-edit"), "Edit", this);
-  remove_action_ = new QAction(QIcon::fromTheme("list-remove"), "Remove", this);
-  auto *refresh_action =
-      new QAction(QIcon::fromTheme("view-refresh"), "Refresh", this);
-  refresh_action->setShortcut(QKeySequence::Refresh);
-  remove_action_->setShortcut(QKeySequence::Delete);
-
-  connect(add_action, &QAction::triggered, this, [this] { open_setup(); });
-  connect(edit_action_, &QAction::triggered, this,
-          [this] { edit_controller(); });
-  connect(remove_action_, &QAction::triggered, this,
-          [this] { remove_controller(); });
-  connect(refresh_action, &QAction::triggered, this, [this] {
-    refresh_controllers();
-    refresh_names();
-    refresh_trace();
-    refresh_audio_buffer();
-    check_bluetooth();
-  });
-
-  auto *toolbar = addToolBar("Controllers");
-  toolbar->setMovable(false);
-  toolbar->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
-  toolbar->addAction(add_action);
-  toolbar->addAction(edit_action_);
-  toolbar->addAction(remove_action_);
-  toolbar->addSeparator();
-  toolbar->addAction(refresh_action);
-
+void MainWindow::build_menus() {
   auto *setup_menu = menuBar()->addMenu("Setup");
   setup_menu->addAction("Run setup…", this, [this] { open_setup(); });
   setup_menu->addAction("Restore Bluetooth input…", this,
