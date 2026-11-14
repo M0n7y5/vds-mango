@@ -5,7 +5,6 @@
 
 #include <QAction>
 #include <QApplication>
-#include <QButtonGroup>
 #include <QCheckBox>
 #include <QGroupBox>
 #include <QHBoxLayout>
@@ -18,7 +17,6 @@
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QPushButton>
-#include <QRadioButton>
 #include <QStatusBar>
 #include <QStyle>
 #include <QTabWidget>
@@ -48,7 +46,6 @@ MainWindow::MainWindow(const QString &socket_path)
   tabs_ = new QTabWidget(this);
   tabs_->addTab(build_controllers_page(), "Controllers");
   tabs_->addTab(build_diagnostics_page(), "Diagnostics");
-  tabs_->addTab(build_advanced_page(), "Advanced");
 
   auto *central = new QWidget(this);
   auto *layout = new QVBoxLayout(central);
@@ -56,7 +53,7 @@ MainWindow::MainWindow(const QString &socket_path)
   layout->addWidget(tabs_, 1);
   setCentralWidget(central);
 
-  build_actions();
+  build_menus();
   update_actions();
   statusBar();
 
@@ -86,6 +83,35 @@ QWidget *MainWindow::build_banner() {
 }
 
 QWidget *MainWindow::build_controllers_page() {
+  auto *add_action =
+      new QAction(QIcon::fromTheme("list-add"), "Add controller", this);
+  edit_action_ = new QAction(QIcon::fromTheme("document-edit"), "Edit", this);
+  remove_action_ = new QAction(QIcon::fromTheme("list-remove"), "Remove", this);
+  auto *refresh_action =
+      new QAction(QIcon::fromTheme("view-refresh"), "Refresh", this);
+  refresh_action->setShortcut(QKeySequence::Refresh);
+  remove_action_->setShortcut(QKeySequence::Delete);
+
+  connect(add_action, &QAction::triggered, this, [this] { open_setup(); });
+  connect(edit_action_, &QAction::triggered, this,
+          [this] { edit_controller(); });
+  connect(remove_action_, &QAction::triggered, this,
+          [this] { remove_controller(); });
+  connect(refresh_action, &QAction::triggered, this, [this] {
+    refresh_controllers();
+    refresh_names();
+    refresh_trace();
+    check_bluetooth();
+  });
+
+  auto *toolbar = new QToolBar(this);
+  toolbar->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+  toolbar->addAction(add_action);
+  toolbar->addAction(edit_action_);
+  toolbar->addAction(remove_action_);
+  toolbar->addSeparator();
+  toolbar->addAction(refresh_action);
+
   table_ = new QTableView(this);
   table_->setModel(&model_);
   table_->setSelectionBehavior(QAbstractItemView::SelectRows);
@@ -111,6 +137,7 @@ QWidget *MainWindow::build_controllers_page() {
 
   auto *page = new QWidget(this);
   auto *layout = new QVBoxLayout(page);
+  layout->addWidget(toolbar);
   layout->addWidget(table_, 1);
   layout->addWidget(empty_hint_);
   return page;
@@ -152,84 +179,7 @@ QWidget *MainWindow::build_diagnostics_page() {
   return page;
 }
 
-QWidget *MainWindow::build_advanced_page() {
-  auto *intro = new QLabel(
-      "How much audio the controller queues before it plays haptics and "
-      "speaker sound. Lower values react sooner, but too little makes the "
-      "sound crackle, especially farther from the computer. A change applies "
-      "at once and goes back to Standard when vdsd restarts. The delays were "
-      "measured on one DualSense lying next to the computer.",
-      this);
-  intro->setWordWrap(true);
-
-  const std::pair<unsigned, const char *> choices[] = {
-      {64, "Standard: about 78 ms, safest"},
-      {32, "Reduced: about 50 ms"},
-      {24, "Low: about 45 ms"},
-      {16, "Lowest: about 33 ms, the speaker may crackle"},
-  };
-
-  auto *group = new QGroupBox("Haptics and speaker delay", this);
-  auto *group_layout = new QVBoxLayout(group);
-  group_layout->addWidget(intro);
-  audio_buffer_choices_ = new QButtonGroup(this);
-  for (const auto &[length, label] : choices) {
-    auto *choice = new QRadioButton(label, this);
-    audio_buffer_choices_->addButton(choice, static_cast<int>(length));
-    group_layout->addWidget(choice);
-  }
-  connect(audio_buffer_choices_, &QButtonGroup::idClicked, this,
-          [this](int length) {
-            client_.send(
-                audio_buffer_request(static_cast<unsigned>(length)),
-                [this](const QByteArray &reply) {
-                  show_audio_buffer(parse_audio_buffer_reply(reply));
-                },
-                [this](const QString &error) {
-                  show_action_error("Haptics and speaker delay", error);
-                  refresh_audio_buffer();
-                });
-          });
-
-  auto *page = new QWidget(this);
-  auto *layout = new QVBoxLayout(page);
-  layout->addWidget(group);
-  layout->addStretch(1);
-  return page;
-}
-
-void MainWindow::build_actions() {
-  auto *add_action =
-      new QAction(QIcon::fromTheme("list-add"), "Add controller", this);
-  edit_action_ = new QAction(QIcon::fromTheme("document-edit"), "Edit", this);
-  remove_action_ = new QAction(QIcon::fromTheme("list-remove"), "Remove", this);
-  auto *refresh_action =
-      new QAction(QIcon::fromTheme("view-refresh"), "Refresh", this);
-  refresh_action->setShortcut(QKeySequence::Refresh);
-  remove_action_->setShortcut(QKeySequence::Delete);
-
-  connect(add_action, &QAction::triggered, this, [this] { open_setup(); });
-  connect(edit_action_, &QAction::triggered, this,
-          [this] { edit_controller(); });
-  connect(remove_action_, &QAction::triggered, this,
-          [this] { remove_controller(); });
-  connect(refresh_action, &QAction::triggered, this, [this] {
-    refresh_controllers();
-    refresh_names();
-    refresh_trace();
-    refresh_audio_buffer();
-    check_bluetooth();
-  });
-
-  auto *toolbar = addToolBar("Controllers");
-  toolbar->setMovable(false);
-  toolbar->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
-  toolbar->addAction(add_action);
-  toolbar->addAction(edit_action_);
-  toolbar->addAction(remove_action_);
-  toolbar->addSeparator();
-  toolbar->addAction(refresh_action);
-
+void MainWindow::build_menus() {
   auto *setup_menu = menuBar()->addMenu("Setup");
   setup_menu->addAction("Run setup…", this, [this] { open_setup(); });
   setup_menu->addAction("Restore Bluetooth input…", this,
@@ -276,15 +226,6 @@ void MainWindow::refresh_trace() {
       [](const QString &) {});
 }
 
-void MainWindow::refresh_audio_buffer() {
-  client_.send(
-      audio_buffer_status_request(),
-      [this](const QByteArray &reply) {
-        show_audio_buffer(parse_audio_buffer_reply(reply));
-      },
-      [](const QString &) {});
-}
-
 void MainWindow::check_bluetooth() {
   bluez_.query_input_plugin(
       [this](bool enabled) {
@@ -314,13 +255,6 @@ void MainWindow::show_trace(const TraceScopes &scopes) {
   trace_output_->setChecked(scopes.output);
 }
 
-void MainWindow::show_audio_buffer(unsigned length) {
-  if (QAbstractButton *choice =
-          audio_buffer_choices_->button(static_cast<int>(length))) {
-    choice->setChecked(true);
-  }
-}
-
 void MainWindow::show_daemon_error(const QString &error) {
   const bool became_reachable =
       error.isEmpty() && (!daemon_known_ || !daemon_error_.isEmpty());
@@ -333,7 +267,6 @@ void MainWindow::show_daemon_error(const QString &error) {
   if (became_reachable) {
     refresh_names();
     refresh_trace();
-    refresh_audio_buffer();
   }
   update_banner();
   update_actions();

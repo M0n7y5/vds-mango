@@ -22,7 +22,6 @@ inline constexpr std::uint32_t kTraceInput =
     kTraceInputAudio | kTraceInputControl;
 inline constexpr std::uint32_t kTraceOutput = 1u << 2;
 inline constexpr std::uint32_t kTraceAll = kTraceInput | kTraceOutput;
-inline constexpr std::uint8_t kDefaultAudioBufferLength = 64;
 
 struct VdsdCommonOptions {
   std::string db_path;
@@ -78,7 +77,6 @@ std::string handle_vdsd_control_command(
     std::span<const VdsdControlControllerStatus> controllers,
     std::span<const VdsdControlPortStatus> ports,
     const std::function<std::vector<ControllerTarget>()> &list_targets,
-    std::uint32_t &trace_flags, std::uint8_t &audio_buffer_length,
-    bool &reload_requested, Logger &logger);
+    std::uint32_t &trace_flags, bool &reload_requested, Logger &logger);
 
 } // namespace vds

@@ -37,6 +37,7 @@ std::string require_jsonl_string(std::span<const JsonlField> fields,
 std::vector<unsigned>
 require_jsonl_unsigned_array(std::span<const JsonlField> fields,
                              std::string_view key, std::string_view context);
+bool has_jsonl_field(std::span<const JsonlField> fields, std::string_view key);
 void reject_unknown_jsonl_fields(std::span<const JsonlField> fields,
                                  std::span<const std::string_view> expected,
                                  std::string_view context);

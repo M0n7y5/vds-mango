@@ -53,7 +53,7 @@ public:
               .trusted = true,
           }};
         },
-        trace_flags_, audio_buffer_length_, reload_requested, logger_);
+        trace_flags_, reload_requested, logger_);
     return QByteArray::fromStdString(reply);
   }
 
@@ -62,7 +62,6 @@ private:
   std::string db_path_;
   vds::Logger logger_;
   std::uint32_t trace_flags_ = 0;
-  std::uint8_t audio_buffer_length_ = vds::kDefaultAudioBufferLength;
 };
 
 std::string error_of(Daemon &daemon, const QByteArray &request,
@@ -162,21 +161,63 @@ void test_enabled_trace_scope_is_read_back_from_the_status_reply() {
   VDS_CHECK_EQ(status.input_control, true);
 }
 
-void test_chosen_audio_buffer_is_read_back_from_the_status_reply() {
+void test_new_controller_starts_with_the_standard_audio_buffer() {
   Daemon daemon;
-  VDS_CHECK_EQ(vds::gui::parse_audio_buffer_reply(
-                   daemon.handle(vds::gui::audio_buffer_request(32))),
-               32u);
-  VDS_CHECK_EQ(vds::gui::parse_audio_buffer_reply(
-                   daemon.handle(vds::gui::audio_buffer_status_request())),
-               32u);
+  (void)daemon.handle(vds::gui::attach_request({
+      .address = "aa:bb:cc:dd:ee:01",
+      .profile = vds::ControllerProfile::Unspecified,
+      .ports = {},
+  }));
+  VDS_CHECK_EQ(vds::gui::parse_list_reply(daemon.handle(vds::gui::list_request()))
+                   .at(0)
+                   .audio_buffer,
+               64u);
+}
+
+void test_chosen_audio_buffer_is_listed_for_that_controller() {
+  Daemon daemon;
+  (void)daemon.handle(vds::gui::attach_request({
+      .address = "aa:bb:cc:dd:ee:01",
+      .profile = vds::ControllerProfile::Unspecified,
+      .ports = {},
+      .audio_buffer = 24,
+  }));
+  VDS_CHECK_EQ(vds::gui::parse_list_reply(daemon.handle(vds::gui::list_request()))
+                   .at(0)
+                   .audio_buffer,
+               24u);
+}
+
+void test_attach_without_an_audio_buffer_keeps_the_saved_one() {
+  Daemon daemon;
+  (void)daemon.handle(vds::gui::attach_request({
+      .address = "aa:bb:cc:dd:ee:01",
+      .profile = vds::ControllerProfile::Unspecified,
+      .ports = {},
+      .audio_buffer = 24,
+  }));
+  (void)daemon.handle(vds::gui::attach_request({
+      .address = "aa:bb:cc:dd:ee:01",
+      .profile = vds::ControllerProfile::Unspecified,
+      .ports = {1},
+  }));
+  VDS_CHECK_EQ(vds::gui::parse_list_reply(daemon.handle(vds::gui::list_request()))
+                   .at(0)
+                   .audio_buffer,
+               24u);
 }
 
 void test_unmeasured_audio_buffer_surfaces_the_daemon_error_text() {
   Daemon daemon;
-  VDS_CHECK_EQ(error_of(daemon, vds::gui::audio_buffer_request(12),
+  VDS_CHECK_EQ(error_of(daemon,
+                        vds::gui::attach_request({
+                            .address = "aa:bb:cc:dd:ee:01",
+                            .profile = vds::ControllerProfile::Unspecified,
+                            .ports = {},
+                            .audio_buffer = 12,
+                        }),
                         [](const QByteArray &reply) {
-                          (void)vds::gui::parse_audio_buffer_reply(reply);
+                          (void)vds::gui::parse_attach_reply(reply);
                         }),
                std::string("audio buffer must be 16, 24, 32 or 64"));
 }
@@ -188,7 +229,9 @@ void run_tests() {
   test_unpaired_address_surfaces_the_daemon_error_text();
   test_detaching_an_unregistered_address_surfaces_the_daemon_error_text();
   test_enabled_trace_scope_is_read_back_from_the_status_reply();
-  test_chosen_audio_buffer_is_read_back_from_the_status_reply();
+  test_new_controller_starts_with_the_standard_audio_buffer();
+  test_chosen_audio_buffer_is_listed_for_that_controller();
+  test_attach_without_an_audio_buffer_keeps_the_saved_one();
   test_unmeasured_audio_buffer_surfaces_the_daemon_error_text();
 }
 

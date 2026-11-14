@@ -389,6 +389,12 @@ const JsonlValue *find_jsonl_field(std::span<const JsonlField> fields,
 
 } // namespace
 
+bool has_jsonl_field(std::span<const JsonlField> fields,
+                     std::string_view key) {
+  return std::any_of(fields.begin(), fields.end(),
+                     [&](const JsonlField &field) { return field.key == key; });
+}
+
 bool require_jsonl_bool(std::span<const JsonlField> fields,
                         std::string_view key, std::string_view context) {
   const JsonlValue *value = find_jsonl_field(fields, key, context);

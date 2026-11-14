@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Jihong Min <hurryman2212@gmail.com>
 #pragma once
 
+#include <cstdint>
 #include <functional>
 #include <optional>
 #include <span>
@@ -15,6 +16,7 @@ namespace vds {
 
 inline constexpr unsigned kMinPortCount = VDS_MIN_PORT_COUNT;
 inline constexpr unsigned kMaxPortCount = VDS_MAX_PORT_COUNT;
+inline constexpr std::uint8_t kDefaultAudioBufferLength = 64;
 
 enum class ControllerProfile {
   Unspecified,
@@ -26,6 +28,9 @@ struct ControllerConfig {
   std::string address;
   ControllerProfile profile = ControllerProfile::Unspecified;
   std::vector<unsigned> ports;
+  /// How much audio the controller queues before it plays haptics and
+  /// speaker sound.
+  std::uint8_t audio_buffer_length = kDefaultAudioBufferLength;
 };
 
 struct ControllerTarget {
@@ -43,6 +48,9 @@ struct ConfigDb {
 std::string normalize_bluetooth_address(std::string_view address);
 ControllerProfile parse_controller_profile(std::string_view profile);
 std::string controller_profile_name(ControllerProfile profile);
+/// Accepts only the lengths confirmed to play on a DualSense: 16, 24, 32, 64.
+/// Other values garbled or muted the output (12, 0).
+std::uint8_t parse_audio_buffer_length(std::string_view text);
 std::vector<unsigned> parse_ports(std::string_view text);
 std::string format_ports(std::span<const unsigned> ports);
 std::string port_path_for_index(unsigned port);
