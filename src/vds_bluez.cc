@@ -30,7 +30,6 @@ constexpr const char *kDbusUnknownPropertyError =
  * libdbus defaults to 25 s, which would stall the single-threaded event loop
  * for that long when bluetoothd is wedged.
  */
-constexpr int kBluezDisconnectTimeoutMs = 500;
 constexpr int kBluezQueryTimeoutMs = 2000;
 
 struct DBusConnectionDeleter {
@@ -441,9 +440,15 @@ bool disconnect_bluez_device(const std::string &address) {
   if (!call) {
     throw std::runtime_error("failed to allocate BlueZ disconnect call");
   }
-  (void)call_dbus_method(connection.get(), call.get(),
-                         "failed to disconnect BlueZ device",
-                         kBluezDisconnectTimeoutMs);
+  /*
+   * BlueZ replies only once the HID profile is torn down, which takes longer
+   * than the event loop may stall. Callers watch for the device to go away.
+   */
+  ::dbus_message_set_no_reply(call.get(), TRUE);
+  if (!::dbus_connection_send(connection.get(), call.get(), nullptr)) {
+    throw std::runtime_error("failed to send BlueZ disconnect call");
+  }
+  ::dbus_connection_flush(connection.get());
   return true;
 }
 
