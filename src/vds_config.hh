@@ -17,6 +17,13 @@ namespace vds {
 inline constexpr unsigned kMinPortCount = VDS_MIN_PORT_COUNT;
 inline constexpr unsigned kMaxPortCount = VDS_MAX_PORT_COUNT;
 inline constexpr std::uint8_t kDefaultAudioBufferLength = 64;
+/// The connect error of a controller that BlueZ keeps connected on a kernel
+/// whose hid-playstation parses Bluetooth audio reports as input. The GUI
+/// compares against it to offer taking Bluetooth input over instead.
+inline constexpr std::string_view kBluetoothSharingUnsupported =
+    "this kernel cannot share the controller with Bluetooth input; let vDS "
+    "Mango take over Bluetooth input instead (vDS Mango setup, or "
+    "override-bluetoothd.sh disable-input --restart)";
 
 enum class ControllerProfile {
   Unspecified,

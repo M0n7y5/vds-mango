@@ -1,0 +1,11 @@
+# While a DualSense is registered with vDS Mango, vdsd lists its address in
+# /run/vds/hidden. If BlueZ connects such a controller, vdsd drives it through
+# hidraw and games get the virtual USB controller, so keep the Bluetooth one
+# away from every other program. This file sorts after the rules that grant
+# access (60-steam-input, 70-uaccess) and before 73-seat-late, which applies it.
+#
+# udev evaluates ENV and TEST before IMPORT within one rule, so the address is
+# imported on a line of its own.
+ACTION!="remove", KERNEL=="hidraw*", KERNELS=="0005:054C:0CE6.*|0005:054C:0DF2.*", IMPORT{parent}="HID_UNIQ"
+ACTION!="remove", KERNEL=="hidraw*", KERNELS=="0005:054C:0CE6.*|0005:054C:0DF2.*", ENV{HID_UNIQ}=="?*", TEST=="/run/vds/hidden/$env{HID_UNIQ}", MODE="0600", GROUP="root", TAG-="uaccess"
+ACTION!="remove", SUBSYSTEM=="input", ATTRS{id/bustype}=="0005", ATTRS{uniq}=="?*", TEST=="/run/vds/hidden/$attr{uniq}", MODE="0600", GROUP="root", TAG-="uaccess", ENV{LIBINPUT_IGNORE_DEVICE}="1"

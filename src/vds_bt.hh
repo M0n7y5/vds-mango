@@ -3,6 +3,7 @@
 #pragma once
 
 #include <cstdint>
+#include <deque>
 #include <optional>
 #include <span>
 #include <stdexcept>
@@ -42,16 +43,19 @@ private:
   UniqueFd interrupt_listener_fd_;
 };
 
-class BtL2capBackend {
+class BtBackend {
 public:
-  BtL2capBackend(std::string address, UniqueFd control_fd,
-                 UniqueFd interrupt_fd);
-  ~BtL2capBackend();
+  /// Owns the two raw HID channels of a controller that connected to vdsd.
+  BtBackend(std::string address, UniqueFd control_fd, UniqueFd interrupt_fd);
+  /// Drives a controller that BlueZ keeps connected, through its hidraw node.
+  /// control_fd() then signals queued feature replies instead of a channel.
+  static BtBackend from_hidraw(std::string address, UniqueFd hidraw_fd);
+  ~BtBackend();
 
-  BtL2capBackend(const BtL2capBackend &) = delete;
-  BtL2capBackend &operator=(const BtL2capBackend &) = delete;
-  BtL2capBackend(BtL2capBackend &&other) noexcept;
-  BtL2capBackend &operator=(BtL2capBackend &&other) noexcept;
+  BtBackend(const BtBackend &) = delete;
+  BtBackend &operator=(const BtBackend &) = delete;
+  BtBackend(BtBackend &&other) noexcept;
+  BtBackend &operator=(BtBackend &&other) noexcept;
 
   int control_fd() const { return control_fd_; }
   int interrupt_fd() const { return interrupt_fd_; }
@@ -67,6 +71,8 @@ private:
   std::string address_;
   int control_fd_ = -1;
   int interrupt_fd_ = -1;
+  bool hidraw_ = false;
+  std::deque<std::vector<std::uint8_t>> feature_replies_;
 };
 
 } // namespace vds
