@@ -41,8 +41,9 @@ std::string vdsd_usage(std::string_view version, std::string_view build_year,
     text += platform_options;
   }
   text += "\n";
-  text += "requires: root, vds_hcd loaded (sudo modprobe vds_hcd), "
-          "bluetoothd --noplugin=input\n"
+  text += "requires: root, vds_hcd loaded (sudo modprobe vds_hcd), and either "
+          "a kernel whose\nhid-playstation ignores Bluetooth audio reports "
+          "or bluetoothd --noplugin=input\n"
           "SIGHUP reopens the log file\n";
   return text;
 }

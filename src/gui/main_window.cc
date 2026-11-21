@@ -61,7 +61,6 @@ MainWindow::MainWindow(const QString &socket_path)
           [this] { refresh_controllers(); });
   poll_timer_.start(kPollIntervalMs);
   refresh_controllers();
-  check_bluetooth();
 }
 
 QWidget *MainWindow::build_banner() {
@@ -101,7 +100,6 @@ QWidget *MainWindow::build_controllers_page() {
     refresh_controllers();
     refresh_names();
     refresh_trace();
-    check_bluetooth();
   });
 
   auto *toolbar = new QToolBar(this);
@@ -226,17 +224,6 @@ void MainWindow::refresh_trace() {
       [](const QString &) {});
 }
 
-void MainWindow::check_bluetooth() {
-  bluez_.query_input_plugin(
-      [this](bool enabled) {
-        show_bluetooth_problem(
-            enabled ? "Bluetooth still connects controllers as plain "
-                      "gamepads, so they cannot reach vDS Mango."
-                    : QString());
-      },
-      [this](const QString &error) { show_bluetooth_problem(error); });
-}
-
 void MainWindow::show_controllers(std::vector<ControllerStatus> controllers) {
   const QString selected = selected_address();
   model_.set_controllers(std::move(controllers));
@@ -247,6 +234,17 @@ void MainWindow::show_controllers(std::vector<ControllerStatus> controllers) {
     }
   }
   empty_hint_->setVisible(model_.rowCount() == 0);
+
+  bool takeover_needed = false;
+  for (int row = 0; row < model_.rowCount(); ++row) {
+    takeover_needed =
+        takeover_needed || needs_bluetooth_takeover(model_.controller(row));
+  }
+  bluetooth_problem_ =
+      takeover_needed ? "This kernel cannot share controllers with the "
+                        "standard Bluetooth support. Run setup to let vDS "
+                        "Mango take them over."
+                      : QString();
 }
 
 void MainWindow::show_trace(const TraceScopes &scopes) {
@@ -273,13 +271,6 @@ void MainWindow::show_daemon_error(const QString &error) {
   offer_setup_once();
 }
 
-void MainWindow::show_bluetooth_problem(const QString &problem) {
-  bluetooth_known_ = true;
-  bluetooth_problem_ = problem;
-  update_banner();
-  offer_setup_once();
-}
-
 void MainWindow::show_action_error(const QString &title, const QString &error) {
   QMessageBox::warning(this, title, error);
 }
@@ -298,7 +289,7 @@ void MainWindow::update_actions() {
 }
 
 void MainWindow::offer_setup_once() {
-  if (setup_offered_ || !daemon_known_ || !bluetooth_known_) {
+  if (setup_offered_ || !daemon_known_) {
     return;
   }
   setup_offered_ = true;
@@ -322,16 +313,16 @@ void MainWindow::open_setup() {
   wizard.exec();
   refresh_controllers();
   refresh_names();
-  check_bluetooth();
 }
 
 void MainWindow::restore_bluetooth_input() {
   QMessageBox confirm(
       QMessageBox::Question, "Restore Bluetooth input",
       "Bluetooth will handle classic keyboards, mice and gamepads itself "
-      "again.\n\nDualSense controllers then connect as plain Bluetooth "
-      "gamepads and no longer reach vDS Mango until you run setup again. "
-      "Bluetooth restarts, so connected devices drop for a few seconds.",
+      "again.\n\nvDS Mango then shares DualSense controllers with it, which "
+      "needs a kernel that supports it. If this one does not, setup offers "
+      "to take them over again. Bluetooth restarts, so connected devices "
+      "drop for a few seconds.",
       QMessageBox::Cancel, this);
   const QPushButton *restore_button =
       confirm.addButton("Restore", QMessageBox::AcceptRole);
@@ -344,7 +335,7 @@ void MainWindow::restore_bluetooth_input() {
     if (!error.isEmpty()) {
       show_action_error("Restore Bluetooth input", error);
     }
-    check_bluetooth();
+    refresh_controllers();
   });
 }
 

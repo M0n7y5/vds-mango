@@ -8,7 +8,9 @@ Arch Linux.
 >
 > This is a beta. It has been tested on one machine: CachyOS with the
 > `linux-cachyos` kernel, KDE Plasma, PipeWire and one DualSense. A DualSense
-> Edge, several controllers at once and Secure Boot are untested. See
+> Edge, several controllers at once and Secure Boot are untested. Sharing a
+> controller with the standard Bluetooth support needs a kernel fix that is
+> new; other kernels fall back to a Bluetooth takeover. See
 > [Reporting Issues](#reporting-issues) if something does not work.
 
 It is a virtual USB-to-Bluetooth bridge for DualSense and DualSense Edge
@@ -97,24 +99,25 @@ sudo mokutil --import /var/lib/dkms/mok.pub
 After installing, open **vDS Mango** from the application menu (or run
 `vds-mango`). The setup wizard does the rest:
 
-1. It starts the service and hands DualSense controllers from Bluetooth to
-   vDS Mango. This asks for your password once and restarts Bluetooth.
-2. Hold Create and PS until the light bar blinks rapidly, pick the controller,
+1. Hold Create and PS until the light bar blinks rapidly, pick the controller,
    and the wizard pairs, trusts and registers it.
-3. Press the PS button. Games now see a USB DualSense.
+2. Press the PS button. Games now see a USB DualSense.
 
-No group membership, logout or audio configuration is needed.
+No group membership, logout or audio configuration is needed, and other
+Bluetooth devices keep working. On a kernel that cannot share the controller
+with the standard Bluetooth support, the wizard says so at step 2 and offers
+to take over Bluetooth input instead; see [Bluetooth](#bluetooth).
 
-Removing the package (`sudo pacman -R vds-mango`) gives the Bluetooth HID
-channels back to `bluetoothd` and restarts Bluetooth. Registered controllers
-in `/var/lib/vds` and the log are kept.
+Removing the package (`sudo pacman -R vds-mango`) undoes that takeover if it
+was applied, which restarts Bluetooth. Registered controllers in
+`/var/lib/vds` and the log are kept.
 
 ## Graphical app
 
 Besides the wizard, `vds-mango` lists the registered controllers with their
 connection state, changes which controller model games see and which virtual
 ports a controller may use, removes controllers, and toggles trace logging.
-Setup > Restore Bluetooth input undoes the Bluetooth change.
+Setup > Restore Bluetooth input undoes a Bluetooth takeover.
 
 Edit also sets, per controller, how much audio the controller queues before
 it plays haptics and speaker sound. Smaller values react sooner; too small
@@ -125,17 +128,7 @@ effect without reconnecting it.
 
 The same setup without the graphical app:
 
-1. Hand the Bluetooth HID channels to `vdsd` (see
-   [Bluetooth limitation](#bluetooth-limitation)):
-
-```sh
-sudo /usr/share/vds-mango/override-bluetoothd.sh disable-input --restart
-```
-
-The script prints the effective `bluetooth.service` ExecStart when it is done.
-`enable-input --restart` reverts it.
-
-2. Pair and trust the controller. Hold Create and PS until the light bar blinks
+1. Pair and trust the controller. Hold Create and PS until the light bar blinks
    rapidly, then in `bluetoothctl`:
 
 ```text
@@ -148,7 +141,7 @@ Both steps are required: an untrusted controller will not be allowed to
 reconnect on its own. When re-pairing a controller that BlueZ already knows,
 run `remove XX:XX:XX:XX:XX:XX` before `scan on`.
 
-3. Register the controller, then connect it:
+2. Register the controller, then connect it:
 
 ```sh
 vdsctl list-targets
@@ -157,6 +150,18 @@ vdsctl attach XX:XX:XX:XX:XX:XX
 
 `attach` registers the address, it does not connect. Press the PS button on the
 controller; the physical pad initiates the Bluetooth connection.
+
+3. Only if `vdsctl list` then shows "this kernel cannot share the controller"
+   in its ERROR column: hand the Bluetooth HID channels to `vdsd` (see
+   [Bluetooth](#bluetooth)), restart the service and press PS again:
+
+```sh
+sudo /usr/share/vds-mango/override-bluetoothd.sh disable-input --restart
+sudo systemctl restart vdsd
+```
+
+The script prints the effective `bluetooth.service` ExecStart when it is done.
+`enable-input --restart` reverts it.
 
 4. Check the result:
 
@@ -327,17 +332,27 @@ unless you create the group yourself (`sudo groupadd --system vds`) and restart
 packaging/ArchLinux/build-arch.sh --pkgrel 1 --output-dir dist/ArchLinux
 ```
 
-## Bluetooth limitation
+## Bluetooth
+
+`vdsd` reaches a controller in one of two ways and picks by itself.
+
+**Shared.** BlueZ connects the controller as usual and `vdsd` drives it
+through its hidraw node. Nothing about Bluetooth is changed. While a
+controller is registered, a udev rule keeps its Bluetooth side away from other
+programs, so games and Steam only see the virtual USB controller. This needs a
+kernel whose `hid-playstation` driver ignores the controller's Bluetooth audio
+reports; `vdsd` tests the driver the first time a controller connects.
+
+**Takeover.** On a kernel without that fix the driver reads the controller's
+microphone packets as button presses, so `vdsd` refuses to share and takes the
+two Bluetooth HID channels itself instead.
 
 > [!IMPORTANT]
 >
-> `bluetoothd` has to run with its input plugin disabled (`--noplugin=input`).
-> A DualSense connects on the two Bluetooth HID channels, and the input plugin
-> otherwise receives it first and exposes it as a plain Bluetooth gamepad.
->
-> While the plugin is off, classic Bluetooth keyboards, mice and gamepads do
-> not work. Bluetooth audio is not affected. The setup wizard lists the paired
-> devices this affects before it changes anything.
+> A takeover runs `bluetoothd` with its input plugin disabled
+> (`--noplugin=input`). While the plugin is off, classic Bluetooth keyboards,
+> mice and gamepads do not work. Bluetooth audio is not affected. The setup
+> wizard lists the paired devices this affects before it changes anything.
 
 The wizard and `override-bluetoothd.sh` install a `bluetooth.service` drop-in
 and restart Bluetooth. In a source checkout the script is
@@ -376,11 +391,15 @@ virtual controller touchpad is classified like the real USB controller:
 
 ```sh
 sudo cp data/99-vds-dualsense-udev.rules /etc/udev/rules.d/
+sudo cp data/72-vds-dualsense-hide.rules /etc/udev/rules.d/
 sudo udevadm control --reload-rules
 sudo udevadm trigger --subsystem-match=input
 ```
 
-The package installs this rule and reloads udev already, so this step is only
+The second rule hides a registered controller's Bluetooth side from other
+programs when `vdsd` shares it with BlueZ (see [Bluetooth](#bluetooth)).
+
+The package installs both rules and reloads udev already, so this step is only
 for source checkouts.
 
 ## Testing

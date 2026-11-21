@@ -11,8 +11,6 @@
 #include <QDBusPendingCallWatcher>
 #include <QDBusPendingReply>
 #include <QDBusVariant>
-#include <QFile>
-#include <QList>
 #include <QMap>
 #include <QStringList>
 #include <QVariantMap>
@@ -50,25 +48,6 @@ void call(QObject *context, const QDBusMessage &message, int timeout_ms,
                      finished->deleteLater();
                      on_reply(*finished);
                    });
-}
-
-bool input_plugin_disabled(const QList<QByteArray> &arguments) {
-  for (qsizetype i = 0; i < arguments.size(); ++i) {
-    const QByteArray &argument = arguments.at(i);
-    QByteArray plugins;
-    if (argument.startsWith("--noplugin=")) {
-      plugins = argument.mid(11);
-    } else if ((argument == "--noplugin" || argument == "-P") &&
-               i + 1 < arguments.size()) {
-      plugins = arguments.at(i + 1);
-    } else if (argument.startsWith("-P")) {
-      plugins = argument.mid(2);
-    }
-    if (plugins.split(',').contains("input")) {
-      return true;
-    }
-  }
-  return false;
 }
 
 BluetoothDevice device_from(const QString &path,
@@ -139,29 +118,6 @@ void Bluez::list_devices(DevicesHandler on_devices, ErrorHandler on_error) {
            return;
          }
          on_devices(std::move(devices));
-       });
-}
-
-void Bluez::query_input_plugin(StateHandler on_enabled, ErrorHandler on_error) {
-  QDBusMessage message = QDBusMessage::createMethodCall(
-      "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus",
-      "GetConnectionUnixProcessID");
-  message << kBluezService;
-  call(this, message, -1,
-       [on_enabled, on_error](const QDBusPendingCall &finished) {
-         const QDBusPendingReply<uint> reply = finished;
-         if (reply.isError()) {
-           on_error("Bluetooth is not running on this computer.");
-           return;
-         }
-         QFile command_line("/proc/" + QString::number(reply.value()) +
-                            "/cmdline");
-         if (!command_line.open(QIODevice::ReadOnly)) {
-           on_error("Cannot read how Bluetooth was started: " +
-                    command_line.errorString());
-           return;
-         }
-         on_enabled(!input_plugin_disabled(command_line.readAll().split('\0')));
        });
 }
 

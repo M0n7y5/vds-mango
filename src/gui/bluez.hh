@@ -28,7 +28,6 @@ struct BluetoothDevice {
 class Bluez : public QObject {
 public:
   using DevicesHandler = std::function<void(std::vector<BluetoothDevice>)>;
-  using StateHandler = std::function<void(bool)>;
   using DoneHandler = std::function<void()>;
   using ErrorHandler = std::function<void(const QString &)>;
 
@@ -36,9 +35,6 @@ public:
   ~Bluez() override;
 
   void list_devices(DevicesHandler on_devices, ErrorHandler on_error);
-  /// Reports whether the running bluetoothd still loads its input plugin,
-  /// which takes DualSense connections away from vdsd.
-  void query_input_plugin(StateHandler on_enabled, ErrorHandler on_error);
   void start_discovery();
   void pair_and_trust(const BluetoothDevice &device, DoneHandler on_done,
                       ErrorHandler on_error);

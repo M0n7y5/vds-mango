@@ -8,7 +8,6 @@
 #include <QString>
 #include <QTimer>
 
-#include "bluez.hh"
 #include "control_client.hh"
 #include "control_protocol.hh"
 #include "controller_model.hh"
@@ -34,11 +33,9 @@ private:
   void refresh_controllers();
   void refresh_names();
   void refresh_trace();
-  void check_bluetooth();
   void show_controllers(std::vector<ControllerStatus> controllers);
   void show_trace(const TraceScopes &scopes);
   void show_daemon_error(const QString &error);
-  void show_bluetooth_problem(const QString &problem);
   void show_action_error(const QString &title, const QString &error);
   void update_banner();
   void update_actions();
@@ -55,14 +52,12 @@ private:
 
   QString socket_path_;
   ControlClient client_;
-  Bluez bluez_;
   ControllerModel model_;
   QTimer poll_timer_;
   QString daemon_error_;
   QString bluetooth_problem_;
   bool list_pending_ = false;
   bool daemon_known_ = false;
-  bool bluetooth_known_ = false;
   bool setup_offered_ = false;
 
   QWidget *banner_ = nullptr;

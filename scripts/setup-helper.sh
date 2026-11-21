@@ -24,6 +24,8 @@ for action in "$@"; do
 		;;
 	disable-bluetooth-input)
 		"$script_dir/override-bluetoothd.sh" --restart disable-input
+		# vdsd keeps a controller's "cannot share" error until it restarts.
+		systemctl try-restart vdsd.service
 		;;
 	enable-bluetooth-input)
 		"$script_dir/override-bluetoothd.sh" --restart enable-input

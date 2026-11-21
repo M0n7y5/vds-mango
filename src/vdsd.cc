@@ -10,6 +10,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <deque>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <optional>
 #include <span>
@@ -23,6 +25,7 @@
 
 #include <fcntl.h>
 #include <grp.h>
+#include <linux/input.h>
 #include <poll.h>
 #include <pwd.h>
 #include <signal.h>
@@ -92,6 +95,16 @@ constexpr auto kHapticsOutputBlockedRetry = std::chrono::milliseconds(2);
 constexpr auto kBluetoothPreemptWait = std::chrono::milliseconds(2000);
 constexpr auto kBluetoothPreemptPoll = std::chrono::milliseconds(100);
 constexpr int kInitialFeatureReportPollMs = 5000;
+/*
+ * A controller listed here is hidden from every program but vdsd when BlueZ
+ * connects it; 72-vds-dualsense-hide.rules tests for the file.
+ */
+constexpr const char *kHiddenPadDir = "/run/vds/hidden";
+constexpr std::uint8_t kPairingInfoReportId = 0x09;
+constexpr std::size_t kPairingInfoAddressMsbOffset = 6;
+constexpr auto kSharingProbeTimeout = std::chrono::milliseconds(400);
+constexpr unsigned kSharingProbeAudioReports = 8;
+constexpr unsigned kSharingProbeMinAudioReports = 4;
 constexpr unsigned kMaxAcceptFailures = 16;
 /*
  * The loop is single threaded, so a control client that stalls stalls every
@@ -216,18 +229,25 @@ struct VirtualPort {
   std::array<bool, 256> feature_cached;
   std::vector<std::uint8_t> pending_feature_reports;
   TraceState trace_state;
+  /* BlueZ keeps the physical pad connected and hid-playstation drives it. */
+  bool shared_with_bluez = false;
 };
 
 struct ControllerRuntime {
   vds::ControllerConfig config;
   std::string device;
   std::optional<std::uint32_t> detected_profile;
-  std::optional<vds::BtL2capBackend> backend;
+  std::optional<vds::BtBackend> backend;
   vds::UniqueFd pending_control_fd;
   vds::UniqueFd pending_interrupt_fd;
   bool virtual_connected = false;
   std::string last_error;
+  /* BlueZ was asked to drop the pad so it reconnects hidden. */
+  bool bluez_kicked = false;
 };
+
+/* Whether BlueZ and vdsd can both drive a pad on this kernel. */
+enum class BluetoothSharing { Unknown, Supported, Unsupported };
 
 enum class EventType : std::uint32_t {
   Control = 1,
@@ -522,6 +542,23 @@ bool write_vds_frame(VirtualPort &port, std::span<const std::uint8_t> bytes,
   }
 }
 
+/*
+ * hid-playstation refuses a second controller with the address of one it
+ * already drives, and it drives the physical pad while BlueZ shares it. The
+ * virtual pad then reports the locally administered form of that address.
+ */
+std::vector<std::uint8_t>
+usb_feature_report(const VirtualPort &port,
+                   std::span<const std::uint8_t> report) {
+  std::vector<std::uint8_t> usb_report(report.begin(), report.end());
+  if (port.shared_with_bluez &&
+      usb_report.size() > kPairingInfoAddressMsbOffset &&
+      usb_report[0] == kPairingInfoReportId) {
+    usb_report[kPairingInfoAddressMsbOffset] |= 0x02;
+  }
+  return usb_report;
+}
+
 void cache_feature_report(VirtualPort &port,
                           std::span<const std::uint8_t> report, bool trace,
                           vds::Logger &logger) {
@@ -530,8 +567,7 @@ void cache_feature_report(VirtualPort &port,
   }
 
   const std::uint8_t report_id = report[0];
-  port.feature_cache[report_id] =
-      std::vector<std::uint8_t>(report.begin(), report.end());
+  port.feature_cache[report_id] = usb_feature_report(port, report);
   port.feature_cached[report_id] = true;
 
   const auto frame = vds::frame_bytes(VDS_FRAME_USB_FEATURE_REPLY,
@@ -539,7 +575,7 @@ void cache_feature_report(VirtualPort &port,
   (void)write_vds_frame(port, frame, trace, logger);
 }
 
-bool try_send_control_write(vds::BtL2capBackend &bt_backend,
+bool try_send_control_write(vds::BtBackend &bt_backend,
                             const PendingControlWrite &write) {
   if (write.is_set) {
     return bt_backend.try_send_feature_set(write.payload);
@@ -548,7 +584,7 @@ bool try_send_control_write(vds::BtL2capBackend &bt_backend,
 }
 
 bool queue_control_write(VirtualPort &port, PendingControlWrite write,
-                         vds::BtL2capBackend &bt_backend,
+                         vds::BtBackend &bt_backend,
                          vds::Logger &logger) {
   if (port.pending_control_writes.empty() &&
       try_send_control_write(bt_backend, write)) {
@@ -588,7 +624,7 @@ bool queue_control_write(VirtualPort &port, PendingControlWrite write,
 }
 
 bool flush_pending_control_writes(VirtualPort &port,
-                                  vds::BtL2capBackend &bt_backend) {
+                                  vds::BtBackend &bt_backend) {
   while (!port.pending_control_writes.empty()) {
     if (!try_send_control_write(bt_backend,
                                 port.pending_control_writes.front())) {
@@ -600,7 +636,7 @@ bool flush_pending_control_writes(VirtualPort &port,
 }
 
 bool flush_pending_bt_state_report(VirtualPort &port,
-                                   vds::BtL2capBackend &bt_backend,
+                                   vds::BtBackend &bt_backend,
                                    std::uint32_t trace_flags,
                                    vds::Logger &logger) {
   if (!port.pending_bt_state_report || !port.pending_bt_state) {
@@ -632,7 +668,7 @@ bool flush_pending_bt_state_report(VirtualPort &port,
 }
 
 void forward_bt_state_if_changed(VirtualPort &port,
-                                 vds::BtL2capBackend &bt_backend,
+                                 vds::BtBackend &bt_backend,
                                  std::uint32_t trace_flags, vds::Logger &logger,
                                  std::string_view reason) {
   const bool output_trace = trace_enabled(trace_flags, kTraceOutput);
@@ -733,6 +769,7 @@ void reset_virtual_port(VirtualPort &port) {
   port.feature_cached = {};
   port.pending_feature_reports.clear();
   port.trace_state = TraceState{};
+  port.shared_with_bluez = false;
 }
 
 void disconnect_virtual_port(VirtualPort &port, vds::Logger &logger) {
@@ -770,7 +807,7 @@ void log_audio_encode_failure(VirtualPort &port,
 
 void handle_frame(const vds_frame_header &header,
                   std::span<const std::uint8_t> payload,
-                  vds::BtL2capBackend *bt_backend, std::uint32_t trace_flags,
+                  vds::BtBackend *bt_backend, std::uint32_t trace_flags,
                   VirtualPort &port, vds::Logger &logger) {
   if (header.type == VDS_FRAME_USB_INTERFACE) {
     if (payload.size() != sizeof(vds_usb_interface_event)) {
@@ -1142,7 +1179,7 @@ void handle_frame(const vds_frame_header &header,
   }
 }
 
-bool handle_vds_frame(VirtualPort &port, vds::BtL2capBackend *bt_backend,
+bool handle_vds_frame(VirtualPort &port, vds::BtBackend *bt_backend,
                       std::uint32_t trace_flags, vds::Logger &logger) {
   std::array<std::uint8_t, sizeof(vds_frame_header) + VDS_FRAME_MAX_PAYLOAD>
       frame;
@@ -1173,7 +1210,7 @@ bool handle_vds_frame(VirtualPort &port, vds::BtL2capBackend *bt_backend,
   return true;
 }
 
-bool handle_bt_input(VirtualPort &port, vds::BtL2capBackend &bt_backend,
+bool handle_bt_input(VirtualPort &port, vds::BtBackend &bt_backend,
                      std::uint32_t trace_flags, vds::Logger &logger) {
   const auto read_time = Clock::now();
   const auto packet = bt_backend.read_interrupt_packet();
@@ -1380,7 +1417,7 @@ bool handle_bt_input(VirtualPort &port, vds::BtL2capBackend &bt_backend,
   return true;
 }
 
-bool handle_bt_control(VirtualPort &port, vds::BtL2capBackend &bt_backend,
+bool handle_bt_control(VirtualPort &port, vds::BtBackend &bt_backend,
                        std::uint32_t trace_flags, vds::Logger &logger) {
   const auto report = bt_backend.read_feature_report();
   if (!report) {
@@ -1391,7 +1428,7 @@ bool handle_bt_control(VirtualPort &port, vds::BtL2capBackend &bt_backend,
   }
 
   const std::uint8_t report_id = (*report)[0];
-  port.feature_cache[report_id] = *report;
+  port.feature_cache[report_id] = usb_feature_report(port, *report);
   port.feature_cached[report_id] = true;
 
   const auto pending = std::find(port.pending_feature_reports.begin(),
@@ -1409,12 +1446,13 @@ bool handle_bt_control(VirtualPort &port, vds::BtL2capBackend &bt_backend,
   }
 
   port.pending_feature_reports.erase(pending);
-  const auto frame = vds::frame_bytes(VDS_FRAME_USB_FEATURE_REPLY, *report);
+  const auto frame = vds::frame_bytes(VDS_FRAME_USB_FEATURE_REPLY,
+                                      port.feature_cache[report_id]);
   (void)write_vds_frame(port, frame, output_trace, logger);
   return true;
 }
 
-void initialize_bt_controller(vds::BtL2capBackend &bt_backend,
+void initialize_bt_controller(vds::BtBackend &bt_backend,
                               VirtualPort &port, vds::Logger &logger) {
   /*
    * One budget for the whole handshake. A per-poll timeout restarts on every
@@ -1738,7 +1776,7 @@ void complete_pending_controller(ControllerRuntime &controller,
   const std::uint32_t profile = resolve_config_profile(controller.config);
   preempt_default_bluetooth_owner(controller.config.address, logger);
 
-  vds::BtL2capBackend candidate(controller.config.address,
+  vds::BtBackend candidate(controller.config.address,
                                 std::move(controller.pending_control_fd),
                                 std::move(controller.pending_interrupt_fd));
 
@@ -1885,6 +1923,247 @@ void handle_bt_accept(std::vector<VirtualPort> &ports,
   }
 }
 
+void sync_hidden_pad_markers(std::span<const ControllerRuntime> controllers,
+                             vds::Logger &logger) {
+  std::error_code error;
+  std::filesystem::create_directories(kHiddenPadDir, error);
+  for (const auto &entry :
+       std::filesystem::directory_iterator(kHiddenPadDir, error)) {
+    const std::string address = entry.path().filename().string();
+    if (std::none_of(controllers.begin(), controllers.end(),
+                     [&](const ControllerRuntime &controller) {
+                       return controller.config.address == address;
+                     })) {
+      std::filesystem::remove(entry.path(), error);
+    }
+  }
+  for (const auto &controller : controllers) {
+    const auto marker =
+        std::filesystem::path(kHiddenPadDir) / controller.config.address;
+    if (!std::filesystem::exists(marker, error) &&
+        !std::ofstream(marker).good()) {
+      logger.log(vds::LogScope::Bluetooth, vds::LogLevel::Warn,
+                 "cannot create " + marker.string() +
+                     "; a controller BlueZ connects stays visible to other "
+                     "programs");
+    }
+  }
+}
+
+/*
+ * Tells whether this kernel's hid-playstation parses the controller's
+ * Bluetooth audio reports as input. Once audio is enabled the pad sends 100
+ * of them per second under the ID and size of its state report. An unfixed
+ * driver turns each into about ten key events on the gamepad it exposes, a
+ * fixed one into none. Empty when the pad sent too few audio reports to tell.
+ */
+std::optional<bool>
+kernel_misreads_bluetooth_audio(vds::BtBackend &bt_backend, VirtualPort &port,
+                                const std::string &gamepad_event,
+                                vds::Logger &logger) {
+  const vds::UniqueFd gamepad(
+      ::open(gamepad_event.c_str(), O_RDONLY | O_NONBLOCK | O_CLOEXEC));
+  if (!gamepad) {
+    throw std::runtime_error("failed to open " + gamepad_event + ": " +
+                             std::strerror(errno));
+  }
+
+  vds::PcmAudioExtractor extractor;
+  const std::vector<std::uint8_t> silence(
+      vds::kPcmWindowFrames * VDS_AUDIO_CHANNELS * sizeof(std::int16_t), 0);
+  unsigned audio_reports = 0;
+  unsigned key_events = 0;
+  const auto deadline = Clock::now() + kSharingProbeTimeout;
+  auto next_send = Clock::now();
+  while (audio_reports < kSharingProbeAudioReports &&
+         Clock::now() < deadline) {
+    if (Clock::now() >= next_send) {
+      for (const auto &chunk : extractor.push_usb_audio(silence)) {
+        (void)bt_backend.try_send_output_report(
+            port.haptics_builder.build_packet(
+                chunk.haptics, chunk.speaker, port.output_state.state(), true,
+                false, vds::kDefaultAudioBufferLength));
+      }
+      next_send += kAudioOutputInterval;
+    }
+
+    std::array<pollfd, 2> fds = {{
+        {.fd = bt_backend.interrupt_fd(), .events = POLLIN, .revents = 0},
+        {.fd = gamepad.get(), .events = POLLIN, .revents = 0},
+    }};
+    (void)::poll(fds.data(), fds.size(), kPendingOutputPollMs);
+    while (const auto packet = bt_backend.read_interrupt_packet()) {
+      if (vds::bt_input_payload_type(*packet) ==
+          vds::BtInputPayloadType::Audio) {
+        ++audio_reports;
+      }
+    }
+    std::array<input_event, 64> events{};
+    while (true) {
+      const ssize_t got =
+          ::read(gamepad.get(), events.data(), sizeof(events));
+      if (got <= 0) {
+        break;
+      }
+      const auto count = static_cast<std::size_t>(got) / sizeof(events[0]);
+      key_events += static_cast<unsigned>(
+          std::count_if(events.begin(), events.begin() + count,
+                        [](const input_event &event) {
+                          return event.type == EV_KEY;
+                        }));
+    }
+  }
+
+  /* Stop the microphone stream again; nothing has asked for audio yet. */
+  (void)bt_backend.try_send_output_report(
+      port.output_state.build_bt_mic_report(false));
+  (void)bt_backend.try_send_output_report(
+      port.output_state.build_bt_state_report());
+
+  logger.log(vds::LogScope::Bluetooth, vds::LogLevel::Info,
+             "hid-playstation check on " + gamepad_event +
+                 " audio_reports=" + std::to_string(audio_reports) +
+                 " key_events=" + std::to_string(key_events));
+  if (audio_reports < kSharingProbeMinAudioReports) {
+    return std::nullopt;
+  }
+  /* Far above what pressing buttons adds, far below what an unfixed driver
+   * makes of the same reports. */
+  return key_events >= 2 * audio_reports;
+}
+
+void complete_shared_controller(ControllerRuntime &controller,
+                                VirtualPort &port, const vds::BluezHidPad &pad,
+                                BluetoothSharing &sharing,
+                                vds::Logger &logger) {
+  vds::UniqueFd hidraw_fd(
+      ::open(pad.hidraw.c_str(), O_RDWR | O_NONBLOCK | O_CLOEXEC));
+  if (!hidraw_fd) {
+    throw std::runtime_error("failed to open " + pad.hidraw + ": " +
+                             std::strerror(errno));
+  }
+  const std::uint32_t profile = resolve_config_profile(controller.config);
+  auto candidate = vds::BtBackend::from_hidraw(controller.config.address,
+                                               std::move(hidraw_fd));
+
+  reset_virtual_port(port);
+  port.shared_with_bluez = true;
+  ioctl_noarg(port.fd.get(), VDS_IOC_DISCONNECT, "VDS_IOC_DISCONNECT");
+  ioctl_set_profile(port.fd.get(), profile);
+  initialize_bt_controller(candidate, port, logger);
+  candidate.send_output_report(port.output_state.build_bt_init_report());
+  if (sharing == BluetoothSharing::Unknown) {
+    const auto misreads =
+        kernel_misreads_bluetooth_audio(candidate, port, pad.gamepad_event,
+                                        logger);
+    if (misreads && *misreads) {
+      sharing = BluetoothSharing::Unsupported;
+      throw std::runtime_error(std::string(vds::kBluetoothSharingUnsupported));
+    }
+    if (misreads) {
+      sharing = BluetoothSharing::Supported;
+    }
+  }
+  port.last_sent_bt_state = port.output_state.state();
+
+  controller.backend = std::move(candidate);
+  controller.detected_profile = profile;
+  ioctl_noarg(port.fd.get(), VDS_IOC_CONNECT, "VDS_IOC_CONNECT");
+  controller.virtual_connected = true;
+  controller.bluez_kicked = false;
+  controller.last_error.clear();
+
+  logger.log(vds::LogScope::Bluetooth, vds::LogLevel::Info,
+             "hidraw backend connected address=" + controller.config.address +
+                 " device=" + port.path + " node=" + pad.hidraw +
+                 " profile=" + profile_name(profile));
+}
+
+/*
+ * Takes over registered pads that BlueZ's input plugin connected. With the
+ * plugin off they arrive on the raw HID channels instead and never show up
+ * here.
+ */
+void attach_bluez_pads(std::vector<VirtualPort> &ports,
+                       std::vector<ControllerRuntime> &controllers,
+                       BluetoothSharing &sharing, vds::Logger &logger,
+                       bool &epoll_dirty) {
+  for (auto &controller : controllers) {
+    if (controller_uses_port(controller) || ports.empty()) {
+      continue;
+    }
+    const auto pad = vds::find_bluez_hid_pad(controller.config.address);
+    if (!pad) {
+      continue;
+    }
+    if (sharing == BluetoothSharing::Unsupported) {
+      controller.last_error = vds::kBluetoothSharingUnsupported;
+      continue;
+    }
+    if (!pad->hidden) {
+      /*
+       * It connected before it was registered, so other programs may hold
+       * it open. Only a reconnect closes those handles.
+       */
+      if (controller.bluez_kicked) {
+        constexpr std::string_view kNotHidden =
+            "the controller reconnected without being hidden from other "
+            "programs; is 72-vds-dualsense-hide.rules installed?";
+        if (controller.last_error != kNotHidden) {
+          logger.log(vds::LogScope::Bluetooth, vds::LogLevel::Error,
+                     "address=" + controller.config.address + " " +
+                         std::string(kNotHidden));
+        }
+        controller.last_error = kNotHidden;
+        continue;
+      }
+      controller.bluez_kicked = true;
+      logger.log(vds::LogScope::Bluetooth, vds::LogLevel::Info,
+                 "disconnecting address=" + controller.config.address +
+                     " so it reconnects hidden from other programs");
+      try {
+        (void)vds::disconnect_bluez_device(controller.config.address);
+      } catch (const std::exception &error) {
+        logger.log(vds::LogScope::Bluetooth, vds::LogLevel::Warn,
+                   "BlueZ disconnect failed address=" +
+                       controller.config.address + " error=" + error.what());
+      }
+      continue;
+    }
+
+    std::optional<std::size_t> port_index;
+    if (!controller.device.empty()) {
+      port_index = find_port_index(ports, controller.device);
+      if (port_index && port_used_by_other_controller(controllers, controller,
+                                                      controller.device)) {
+        port_index.reset();
+      }
+    }
+    if (!port_index) {
+      port_index = available_port_index(ports, controllers, controller);
+      if (!port_index) {
+        controller.last_error = "no available virtual port";
+        continue;
+      }
+      controller.device = ports[*port_index].path;
+    }
+
+    try {
+      complete_shared_controller(controller, ports[*port_index], *pad,
+                                 sharing, logger);
+      epoll_dirty = true;
+    } catch (const std::exception &error) {
+      controller.backend.reset();
+      controller.virtual_connected = false;
+      controller.device.clear();
+      controller.last_error = error.what();
+      logger.log(vds::LogScope::Bluetooth, vds::LogLevel::Error,
+                 "connect failed address=" + controller.config.address +
+                     " node=" + pad->hidraw + " error=" + error.what());
+    }
+  }
+}
+
 bool has_pending_bt_output(std::span<const VirtualPort> ports,
                            std::span<const ControllerRuntime> controllers) {
   for (const auto &controller : controllers) {
@@ -1930,7 +2209,7 @@ int next_wakeup_timeout_ms(std::span<const VirtualPort> ports,
 }
 
 bool flush_pending_audio_chunk(VirtualPort &port,
-                               vds::BtL2capBackend &bt_backend,
+                               vds::BtBackend &bt_backend,
                                std::uint32_t trace_flags,
                                std::uint8_t audio_buffer_length,
                                vds::Logger &logger) {
@@ -2097,6 +2376,24 @@ void flush_pending_outputs(std::vector<VirtualPort> &ports,
   }
 }
 
+/*
+ * A pad BlueZ shares with vdsd stays connected and hidden when vdsd lets go
+ * of it. Only a reconnect gives it back to other programs.
+ */
+void release_shared_pad(const std::string &address, vds::Logger &logger) {
+  const auto pad = vds::find_bluez_hid_pad(address);
+  if (!pad || !pad->hidden) {
+    return;
+  }
+  try {
+    (void)vds::disconnect_bluez_device(address);
+  } catch (const std::exception &error) {
+    logger.log(vds::LogScope::Bluetooth, vds::LogLevel::Warn,
+               "BlueZ disconnect failed address=" + address +
+                   " error=" + error.what());
+  }
+}
+
 void reconcile_controller_configs(std::vector<VirtualPort> &ports,
                                   std::vector<ControllerRuntime> &controllers,
                                   const std::string &db_path,
@@ -2145,20 +2442,6 @@ void reconcile_controller_configs(std::vector<VirtualPort> &ports,
                      " reason=no allowed virtual port present ports=[" +
                      vds::format_ports(config.ports) + "]");
     }
-    /*
-     * Kick BlueZ off addresses that are new to this reload. The connect-time
-     * preempt never fires while BlueZ still owns the pad (the raw channels
-     * never arrive), and preempting unchanged addresses would stall every
-     * reload for up to 2 s each.
-     */
-    const bool is_new_address =
-        std::none_of(controllers.begin(), controllers.end(),
-                     [&](const ControllerRuntime &old) {
-                       return old.config.address == config.address;
-                     });
-    if (virtual_port_provider_available && is_new_address) {
-      preempt_default_bluetooth_owner(config.address, logger);
-    }
     ControllerRuntime next{
         .config = config,
         .device = {},
@@ -2168,6 +2451,7 @@ void reconcile_controller_configs(std::vector<VirtualPort> &ports,
         .pending_interrupt_fd = {},
         .virtual_connected = false,
         .last_error = {},
+        .bluez_kicked = false,
     };
 
     for (std::size_t old_index = 0; old_index < controllers.size();
@@ -2190,6 +2474,7 @@ void reconcile_controller_configs(std::vector<VirtualPort> &ports,
 
       next.detected_profile = old.detected_profile;
       next.last_error = std::move(old.last_error);
+      next.bluez_kicked = old.bluez_kicked;
       if (old_uses_port && old_device_available) {
         next.device = std::move(old.device);
         next.backend = std::move(old.backend);
@@ -2208,6 +2493,7 @@ void reconcile_controller_configs(std::vector<VirtualPort> &ports,
                          " device=" + old.device);
         }
         old.backend.reset();
+        release_shared_pad(old.config.address, logger);
         old.pending_control_fd.reset();
         old.pending_interrupt_fd.reset();
         old.virtual_connected = false;
@@ -2240,6 +2526,7 @@ void reconcile_controller_configs(std::vector<VirtualPort> &ports,
           "raw backend removed address=" + controllers[i].config.address +
               " device=" + controllers[i].device);
     }
+    release_shared_pad(controllers[i].config.address, logger);
   }
 
   controllers = std::move(next_controllers);
@@ -2566,6 +2853,8 @@ int run_daemon(const Options &options, vds::Logger &logger) {
   bool first_reload = true;
   unsigned bt_accept_failures = 0;
   unsigned control_accept_failures = 0;
+  BluetoothSharing sharing = BluetoothSharing::Unknown;
+  bool scan_bluez_pads = false;
   SignalRequests signals;
 
   while (!signals.stop) {
@@ -2586,6 +2875,10 @@ int run_daemon(const Options &options, vds::Logger &logger) {
         reconcile_controller_configs(ports, controllers, options.db_path,
                                      logger);
         epoll_dirty = true;
+        if (sharing != BluetoothSharing::Unsupported) {
+          sync_hidden_pad_markers(controllers, logger);
+        }
+        scan_bluez_pads = true;
       } catch (const std::exception &error) {
         /* Starting with no usable state is a setup failure, not a reload. */
         if (first_reload) {
@@ -2599,6 +2892,19 @@ int run_daemon(const Options &options, vds::Logger &logger) {
       }
       reload_requested = false;
       first_reload = false;
+    }
+
+    if (scan_bluez_pads) {
+      scan_bluez_pads = false;
+      const bool was_supported = sharing != BluetoothSharing::Unsupported;
+      attach_bluez_pads(ports, controllers, sharing, logger, epoll_dirty);
+      if (was_supported && sharing == BluetoothSharing::Unsupported) {
+        /* Let the pads reconnect as plain Bluetooth gamepads meanwhile. */
+        sync_hidden_pad_markers({}, logger);
+        for (const auto &controller : controllers) {
+          release_shared_pad(controller.config.address, logger);
+        }
+      }
     }
 
     if (epoll_dirty || !epoll_fd) {
@@ -2662,11 +2968,15 @@ int run_daemon(const Options &options, vds::Logger &logger) {
       }
 
       if (source.type == EventType::Udev) {
-        if ((revents & EPOLLIN) != 0 && vds_monitor.drain()) {
-          logger.log(vds::LogScope::Port, vds::LogLevel::Info,
-                     "virtual endpoint udev event; reloading");
-          reload_requested = true;
-          epoll_dirty = true;
+        if ((revents & EPOLLIN) != 0) {
+          const auto changes = vds_monitor.drain();
+          if (changes.vds_port) {
+            logger.log(vds::LogScope::Port, vds::LogLevel::Info,
+                       "virtual endpoint udev event; reloading");
+            reload_requested = true;
+            epoll_dirty = true;
+          }
+          scan_bluez_pads = scan_bluez_pads || changes.input;
         }
         if ((revents & (EPOLLERR | EPOLLHUP)) != 0) {
           throw std::runtime_error("udev monitor epoll error");
@@ -2681,7 +2991,7 @@ int run_daemon(const Options &options, vds::Logger &logger) {
         auto &port = ports[source.index];
         ControllerRuntime *controller =
             controller_for_port(controllers, port.path);
-        vds::BtL2capBackend *backend = controller && controller->backend
+        vds::BtBackend *backend = controller && controller->backend
                                            ? &*controller->backend
                                            : nullptr;
         if ((revents & EPOLLIN) != 0) {
@@ -2781,7 +3091,7 @@ int run_daemon(const Options &options, vds::Logger &logger) {
         }
         if ((revents & (EPOLLERR | EPOLLHUP)) != 0) {
           drop_bt_backend(controller, port,
-                          "Bluetooth L2CAP interrupt epoll error", logger);
+                          "Bluetooth interrupt channel epoll error", logger);
           epoll_dirty = true;
         }
       }
@@ -2792,6 +3102,10 @@ int run_daemon(const Options &options, vds::Logger &logger) {
   }
 
   logger.log(vds::LogScope::Daemon, vds::LogLevel::Info, "stopping");
+  sync_hidden_pad_markers({}, logger);
+  for (const auto &controller : controllers) {
+    release_shared_pad(controller.config.address, logger);
+  }
   disconnect_all(ports, controllers, logger);
   return 0;
 }

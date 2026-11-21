@@ -49,6 +49,10 @@ struct TraceScopes {
   bool output = false;
 };
 
+/// The controller cannot be shared with the standard Bluetooth support on
+/// this kernel, so vDS Mango has to take Bluetooth input over.
+bool needs_bluetooth_takeover(const ControllerStatus &controller);
+
 QByteArray list_request();
 QByteArray list_targets_request();
 QByteArray attach_request(const ControllerAssignment &assignment);

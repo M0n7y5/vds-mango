@@ -17,6 +17,9 @@
 #include <bluetooth/l2cap.h>
 
 #include <fcntl.h>
+#include <linux/hidraw.h>
+#include <sys/eventfd.h>
+#include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -34,6 +37,9 @@ constexpr std::uint16_t kHidControlPsm = 0x0011;
 constexpr std::uint16_t kHidInterruptPsm = 0x0013;
 constexpr std::size_t kBtReadBufferSize = 1024;
 constexpr int kBtWritePollTimeoutMs = 1000;
+// hidraw carries bare reports; the parsers expect the HIDP header L2CAP has.
+constexpr std::uint8_t kHidpInputHeader = 0xa1;
+constexpr std::uint8_t kHidpFeatureHeader = 0xa3;
 
 void close_if_open(int &fd) {
   if (fd >= 0) {
@@ -189,6 +195,23 @@ std::optional<BtAcceptedChannel> accept_l2cap_psm(int listener_fd,
   };
 }
 
+bool try_write_hidraw(int fd, std::span<const std::uint8_t> report) {
+  while (true) {
+    const ssize_t written = ::write(fd, report.data(), report.size());
+    if (written == static_cast<ssize_t>(report.size())) {
+      return true;
+    }
+    if (written < 0 && errno == EINTR) {
+      continue;
+    }
+    if (written < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+      return false;
+    }
+    throw BluetoothLinkError("Bluetooth hidraw write failed: " +
+                             std::string(std::strerror(errno)));
+  }
+}
+
 } // namespace
 
 BtL2capAcceptor::BtL2capAcceptor()
@@ -203,24 +226,37 @@ std::optional<BtAcceptedChannel> BtL2capAcceptor::accept_interrupt() {
   return accept_l2cap_psm(interrupt_listener_fd_.get(), kHidInterruptPsm);
 }
 
-BtL2capBackend::BtL2capBackend(std::string address, UniqueFd control_fd,
-                               UniqueFd interrupt_fd)
+BtBackend::BtBackend(std::string address, UniqueFd control_fd,
+                     UniqueFd interrupt_fd)
     : address_(std::move(address)), control_fd_(control_fd.release()),
       interrupt_fd_(interrupt_fd.release()) {}
 
-BtL2capBackend::~BtL2capBackend() {
+BtBackend::~BtBackend() {
   close_if_open(interrupt_fd_);
   close_if_open(control_fd_);
 }
 
-BtL2capBackend::BtL2capBackend(BtL2capBackend &&other) noexcept
+BtBackend BtBackend::from_hidraw(std::string address, UniqueFd hidraw_fd) {
+  UniqueFd ready(::eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC));
+  if (!ready) {
+    throw BluetoothLinkError("eventfd failed: " +
+                             std::string(std::strerror(errno)));
+  }
+  BtBackend backend(std::move(address), std::move(ready),
+                    std::move(hidraw_fd));
+  backend.hidraw_ = true;
+  return backend;
+}
+
+BtBackend::BtBackend(BtBackend &&other) noexcept
     : address_(std::move(other.address_)), control_fd_(other.control_fd_),
-      interrupt_fd_(other.interrupt_fd_) {
+      interrupt_fd_(other.interrupt_fd_), hidraw_(other.hidraw_),
+      feature_replies_(std::move(other.feature_replies_)) {
   other.control_fd_ = -1;
   other.interrupt_fd_ = -1;
 }
 
-BtL2capBackend &BtL2capBackend::operator=(BtL2capBackend &&other) noexcept {
+BtBackend &BtBackend::operator=(BtBackend &&other) noexcept {
   if (this == &other) {
     return *this;
   }
@@ -230,46 +266,78 @@ BtL2capBackend &BtL2capBackend::operator=(BtL2capBackend &&other) noexcept {
   address_ = std::move(other.address_);
   control_fd_ = other.control_fd_;
   interrupt_fd_ = other.interrupt_fd_;
+  hidraw_ = other.hidraw_;
+  feature_replies_ = std::move(other.feature_replies_);
   other.control_fd_ = -1;
   other.interrupt_fd_ = -1;
   return *this;
 }
 
-void BtL2capBackend::send_output_report(std::span<const std::uint8_t> report) {
+void BtBackend::send_output_report(std::span<const std::uint8_t> report) {
   if (interrupt_fd_ < 0) {
+    return;
+  }
+  if (hidraw_) {
+    if (!try_write_hidraw(interrupt_fd_, report)) {
+      throw BluetoothLinkError("Bluetooth hidraw write would block");
+    }
     return;
   }
   const auto packet = hidp_output_packet(report);
   write_bt_packet(interrupt_fd_, packet);
 }
 
-bool BtL2capBackend::try_send_output_report(
-    std::span<const std::uint8_t> report) {
+bool BtBackend::try_send_output_report(std::span<const std::uint8_t> report) {
   if (interrupt_fd_ < 0) {
     return false;
+  }
+  if (hidraw_) {
+    return try_write_hidraw(interrupt_fd_, report);
   }
   const auto packet = hidp_output_packet(report);
   return try_write_packet(interrupt_fd_, packet);
 }
 
-void BtL2capBackend::send_feature_get(std::uint8_t report_id) {
+void BtBackend::send_feature_get(std::uint8_t report_id) {
   if (control_fd_ < 0) {
+    return;
+  }
+  if (hidraw_) {
+    (void)try_send_feature_get(report_id);
     return;
   }
   const auto packet = feature_get_packet(report_id);
   write_bt_packet(control_fd_, packet);
 }
 
-bool BtL2capBackend::try_send_feature_get(std::uint8_t report_id) {
+bool BtBackend::try_send_feature_get(std::uint8_t report_id) {
   if (control_fd_ < 0) {
     return false;
+  }
+  if (hidraw_) {
+    // hidraw answers a feature request inside the ioctl, which blocks until
+    // the controller replies. Keep the reply for read_feature_report() so
+    // callers see the same order as on L2CAP.
+    std::array<std::uint8_t, 256> buffer{};
+    buffer[0] = report_id;
+    const int got =
+        ::ioctl(interrupt_fd_, HIDIOCGFEATURE(buffer.size()), buffer.data());
+    if (got < 0) {
+      throw BluetoothLinkError("Bluetooth hidraw feature get failed: " +
+                               std::string(std::strerror(errno)));
+    }
+    std::vector<std::uint8_t> reply{kHidpFeatureHeader};
+    reply.insert(reply.end(), buffer.begin(),
+                 buffer.begin() + static_cast<std::ptrdiff_t>(got));
+    feature_replies_.push_back(std::move(reply));
+    (void)::eventfd_write(control_fd_, 1);
+    return true;
   }
   const auto packet = feature_get_packet(report_id);
   return try_write_packet(control_fd_, packet);
 }
 
-bool BtL2capBackend::try_send_feature_set(
-    std::span<const std::uint8_t> report) {
+bool BtBackend::try_send_feature_set(std::span<const std::uint8_t> report) {
   if (control_fd_ < 0) {
     return false;
   }
@@ -277,10 +345,32 @@ bool BtL2capBackend::try_send_feature_set(
   if (packet.empty()) {
     return true;
   }
+  if (hidraw_) {
+    // Drop the HIDP header byte; hidraw wants the report itself.
+    if (::ioctl(interrupt_fd_, HIDIOCSFEATURE(packet.size() - 1),
+                packet.data() + 1) < 0) {
+      throw BluetoothLinkError("Bluetooth hidraw feature set failed: " +
+                               std::string(std::strerror(errno)));
+    }
+    return true;
+  }
   return try_write_packet(control_fd_, packet);
 }
 
-std::optional<std::vector<std::uint8_t>> BtL2capBackend::read_feature_report() {
+std::optional<std::vector<std::uint8_t>> BtBackend::read_feature_report() {
+  if (hidraw_) {
+    eventfd_t pending = 0;
+    (void)::eventfd_read(control_fd_, &pending);
+    if (feature_replies_.empty()) {
+      return std::nullopt;
+    }
+    const auto reply = std::move(feature_replies_.front());
+    feature_replies_.pop_front();
+    if (!feature_replies_.empty()) {
+      (void)::eventfd_write(control_fd_, 1);
+    }
+    return bt_feature_to_usb_feature_reply(reply);
+  }
   std::array<std::uint8_t, kBtReadBufferSize> buffer{};
   const ssize_t got = ::read(control_fd_, buffer.data(), buffer.size());
   if (got < 0) {
@@ -297,22 +387,26 @@ std::optional<std::vector<std::uint8_t>> BtL2capBackend::read_feature_report() {
       std::span(buffer.data(), static_cast<std::size_t>(got)));
 }
 
-std::optional<std::vector<std::uint8_t>>
-BtL2capBackend::read_interrupt_packet() {
+std::optional<std::vector<std::uint8_t>> BtBackend::read_interrupt_packet() {
   std::array<std::uint8_t, kBtReadBufferSize> buffer{};
   const ssize_t got = ::read(interrupt_fd_, buffer.data(), buffer.size());
   if (got < 0) {
     if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
       return std::nullopt;
     }
-    throw BluetoothLinkError("Bluetooth L2CAP read failed: " +
+    throw BluetoothLinkError("Bluetooth interrupt read failed: " +
                              std::string(std::strerror(errno)));
   }
   if (got == 0) {
-    throw BluetoothLinkError("Bluetooth L2CAP interrupt channel closed");
+    throw BluetoothLinkError("Bluetooth interrupt channel closed");
   }
-  return std::vector<std::uint8_t>(
-      buffer.begin(), buffer.begin() + static_cast<std::ptrdiff_t>(got));
+  std::vector<std::uint8_t> packet;
+  if (hidraw_) {
+    packet.push_back(kHidpInputHeader);
+  }
+  packet.insert(packet.end(), buffer.begin(),
+                buffer.begin() + static_cast<std::ptrdiff_t>(got));
+  return packet;
 }
 
 } // namespace vds
