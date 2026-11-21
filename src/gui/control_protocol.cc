@@ -99,6 +99,13 @@ QJsonObject command_reply(const QByteArray &reply) {
 
 } // namespace
 
+bool needs_bluetooth_takeover(const ControllerStatus &controller) {
+  return controller.error ==
+         QString::fromUtf8(kBluetoothSharingUnsupported.data(),
+                           static_cast<qsizetype>(
+                               kBluetoothSharingUnsupported.size()));
+}
+
 QByteArray list_request() {
   return request_line(QJsonObject{{"command", "list"}});
 }
