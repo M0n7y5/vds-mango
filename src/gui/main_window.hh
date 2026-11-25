@@ -31,7 +31,7 @@ private:
   QWidget *build_banner();
   QWidget *build_controllers_page();
   void build_menus();
-  void build_health_strip();
+  QWidget *build_health_strip();
 
   void refresh_controllers();
   void refresh_status();
@@ -42,6 +42,8 @@ private:
   void update_cards();
   void show_daemon_error(const QString &error);
   void show_action_error(const QString &title, const QString &error);
+  /// Shows text beside the checks for a few seconds.
+  void show_message(const QString &text);
   /// The three checks along the bottom, and the banner while one fails.
   void update_health();
   void offer_setup_once();
@@ -62,6 +64,7 @@ private:
   std::vector<ControllerStatus> controllers_;
   QHash<QString, QString> names_;
   QTimer poll_timer_;
+  QTimer message_timer_;
   QString daemon_error_;
   DaemonStatus daemon_status_;
   QString bluetooth_problem_;
@@ -83,6 +86,7 @@ private:
   QLabel *service_check_ = nullptr;
   QLabel *kernel_check_ = nullptr;
   QLabel *bluetooth_check_ = nullptr;
+  QLabel *message_ = nullptr;
 };
 
 } // namespace vds::gui

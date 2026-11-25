@@ -175,6 +175,7 @@ std::vector<ControllerStatus> parse_list_reply(const QByteArray &reply) {
         .headset = require_bool(object, "headset"),
         .mic_muted = require_bool(object, "mic_muted"),
         .firmware = require_string(object, "firmware"),
+        .firmware_build = require_string(object, "firmware_build"),
     });
   }
   return controllers;

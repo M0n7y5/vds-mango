@@ -273,7 +273,8 @@ void test_controller_that_is_off_lists_no_battery_level() {
                  .battery.has_value());
 }
 
-void test_firmware_of_a_connected_controller_reaches_the_gui() {
+vds::gui::ControllerStatus listed_with_firmware(std::uint16_t version,
+                                                std::uint32_t build) {
   Daemon daemon;
   (void)daemon.handle(vds::gui::attach_request({
       .address = "aa:bb:cc:dd:ee:01",
@@ -285,13 +286,22 @@ void test_firmware_of_a_connected_controller_reaches_the_gui() {
       .connected = true,
       .path = "vds0",
       .error = "",
-      .firmware = 0x0110002a,
+      .firmware = version,
+      .firmware_build = build,
   });
+  return vds::gui::parse_list_reply(daemon.handle(vds::gui::list_request()))
+      .at(0);
+}
+
+void test_firmware_keeps_the_leading_zero_sony_prints() {
+  VDS_CHECK_EQ(listed_with_firmware(0x0630, 0x0110002a).firmware.toStdString(),
+               std::string("0630"));
+}
+
+void test_firmware_build_is_listed_as_three_decimal_parts() {
   VDS_CHECK_EQ(
-      vds::gui::parse_list_reply(daemon.handle(vds::gui::list_request()))
-          .at(0)
-          .firmware.toStdString(),
-      std::string("0x0110002a"));
+      listed_with_firmware(0x0630, 0x0110002a).firmware_build.toStdString(),
+      std::string("1.16.42"));
 }
 
 void test_status_reports_the_daemon_version() {
@@ -367,7 +377,8 @@ void run_tests() {
   test_unmeasured_audio_buffer_surfaces_the_daemon_error_text();
   test_battery_of_a_connected_controller_reaches_the_gui();
   test_controller_that_is_off_lists_no_battery_level();
-  test_firmware_of_a_connected_controller_reaches_the_gui();
+  test_firmware_keeps_the_leading_zero_sony_prints();
+  test_firmware_build_is_listed_as_three_decimal_parts();
   test_status_reports_the_daemon_version();
   test_status_before_any_connect_leaves_the_kernel_fix_unknown();
   test_status_reports_a_kernel_without_the_fix();

@@ -16,6 +16,7 @@
 #include <QVBoxLayout>
 
 #include "diagnostics_dialog.hh"
+#include "spacing.hh"
 
 namespace vds::gui {
 
@@ -73,6 +74,9 @@ DiagnosticsDialog::DiagnosticsDialog(const QString &socket_path,
   connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
 
   auto *layout = new QVBoxLayout(this);
+  layout->setContentsMargins(kWindowMargin, kWindowMargin, kWindowMargin,
+                             kWindowMargin);
+  layout->setSpacing(kBlockSpacing);
   layout->addWidget(info_group, 1);
   layout->addWidget(trace_group_);
   layout->addWidget(buttons);

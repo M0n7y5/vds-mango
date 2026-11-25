@@ -121,7 +121,8 @@ controllers in `/var/lib/vds` and the log.
 ## Graphical app
 
 Besides the wizard, `vds-mango` shows a card for each registered controller
-with its connection state, battery level, and headset and microphone state.
+with its connection state, battery level, firmware version, and headset and
+microphone state.
 From a card you change which controller model games see and which virtual
 ports the controller may use, remove it, or press Test to make it vibrate
 briefly. Test needs the controller's audio to be idle, so close a game that

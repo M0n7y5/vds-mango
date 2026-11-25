@@ -243,12 +243,21 @@ std::string format_control_list_reply(
     reply += jsonl_bool_field("headset", status && status->headset);
     reply += ',';
     reply += jsonl_bool_field("mic_muted", status && status->mic_muted);
-    char firmware[11] = "";
+    char firmware[16] = "";
     if (status && status->firmware) {
-      std::snprintf(firmware, sizeof(firmware), "0x%08x", *status->firmware);
+      std::snprintf(firmware, sizeof(firmware), "%04x",
+                    static_cast<unsigned>(*status->firmware));
     }
     reply += ',';
     reply += jsonl_string_field("firmware", firmware);
+    char firmware_build[16] = "";
+    if (status && status->firmware_build) {
+      const std::uint32_t build = *status->firmware_build;
+      std::snprintf(firmware_build, sizeof(firmware_build), "%u.%u.%u",
+                    build >> 24, (build >> 16) & 0xff, build & 0xffff);
+    }
+    reply += ',';
+    reply += jsonl_string_field("firmware_build", firmware_build);
     reply += "}\n";
   }
   return reply;

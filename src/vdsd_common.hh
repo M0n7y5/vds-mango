@@ -40,8 +40,10 @@ struct VdsdControlControllerStatus {
   bool charging = false;
   bool headset = false;
   bool mic_muted = false;
-  /// As hid-playstation prints it, for bug reports.
-  std::optional<std::uint32_t> firmware = std::nullopt;
+  /// The version Sony's updater shows as four hex digits, such as 0630.
+  std::optional<std::uint16_t> firmware = std::nullopt;
+  /// The internal build, 0xAABBCCCC for AA.BB.CCCC.
+  std::optional<std::uint32_t> firmware_build = std::nullopt;
   /// A game or app is playing through the controller's sound card.
   bool audio_busy = false;
 };

@@ -259,7 +259,8 @@ ControllerCard::ControllerCard(std::function<void()> on_test,
   actions->addWidget(remove, 0, Qt::AlignBottom);
 
   auto *layout = new QVBoxLayout(this);
-  layout->setContentsMargins(16, 14, 12, 10);
+  // Tool buttons pad their text, so the right and bottom insets are smaller.
+  layout->setContentsMargins(16, 14, 8, 10);
   layout->setSpacing(10);
   layout->addLayout(top);
   layout->addLayout(chips);
@@ -271,7 +272,10 @@ void ControllerCard::show_controller(const ControllerStatus &controller,
   connected_ = controller.connected;
   test_->setVisible(connected_);
   name_->setText(name);
-  address_->setText(controller.address);
+  address_->setText(controller.firmware.isEmpty()
+                        ? controller.address
+                        : controller.address + " · Firmware " +
+                              controller.firmware);
 
   const bool edge = name.contains("Edge");
   const int picture_state = (edge ? 2 : 0) | (connected_ ? 1 : 0);

@@ -17,6 +17,7 @@
 
 #include "controller_card.hh"
 #include "controller_dialog.hh"
+#include "spacing.hh"
 
 namespace vds::gui {
 
@@ -99,6 +100,9 @@ ControllerDialog::ControllerDialog(const ControllerStatus &controller,
   connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
 
   auto *layout = new QVBoxLayout(this);
+  layout->setContentsMargins(kWindowMargin, kWindowMargin, kWindowMargin,
+                             kWindowMargin);
+  layout->setSpacing(kBlockSpacing);
   layout->addLayout(form);
   if (controller.connected) {
     layout->addWidget(new QLabel(

@@ -59,6 +59,13 @@ struct BatteryState {
   bool charging = false;
 };
 
+struct FirmwareInfo {
+  /// 0xAABBCCCC for version AA.BB.CCCC. hid-playstation logs it as fw_version.
+  std::uint32_t version = 0;
+  /// The number Sony's updater shows as four hex digits, such as 0630.
+  std::uint16_t update_version = 0;
+};
+
 void fill_output_report_checksum(std::span<std::uint8_t> report);
 void fill_feature_report_checksum(std::span<std::uint8_t> report);
 std::vector<std::uint8_t>
@@ -73,8 +80,8 @@ std::optional<BatteryState> usb_input_battery(const UsbInputReport &report);
 /// The feature report hid-playstation reads the firmware version from.
 inline constexpr std::uint8_t kFirmwareInfoReportId = 0x20;
 /// Empty when the report is not a complete firmware info report.
-std::optional<std::uint32_t>
-usb_firmware_version(std::span<const std::uint8_t> feature_report);
+std::optional<FirmwareInfo>
+usb_firmware_info(std::span<const std::uint8_t> feature_report);
 std::optional<std::vector<std::uint8_t>>
 bt_feature_to_usb_feature_reply(std::span<const std::uint8_t> packet);
 

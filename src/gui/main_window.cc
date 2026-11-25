@@ -17,7 +17,6 @@
 #include <QPushButton>
 #include <QScrollArea>
 #include <QStackedWidget>
-#include <QStatusBar>
 #include <QStringList>
 #include <QStyle>
 #include <QSysInfo>
@@ -28,6 +27,7 @@
 #include "diagnostics_dialog.hh"
 #include "main_window.hh"
 #include "setup_wizard.hh"
+#include "spacing.hh"
 
 namespace vds::gui {
 
@@ -54,13 +54,18 @@ MainWindow::MainWindow(const QString &socket_path)
 
   auto *central = new QWidget(this);
   auto *layout = new QVBoxLayout(central);
+  layout->setContentsMargins(kWindowMargin, kWindowMargin, kWindowMargin,
+                             kWindowMargin);
+  layout->setSpacing(kBlockSpacing);
   layout->addWidget(build_banner());
   layout->addWidget(build_controllers_page(), 1);
+  layout->addWidget(build_health_strip());
   setCentralWidget(central);
 
   build_menus();
-  build_health_strip();
   update_health();
+  message_timer_.setSingleShot(true);
+  connect(&message_timer_, &QTimer::timeout, message_, &QLabel::clear);
 
   connect(&poll_timer_, &QTimer::timeout, this, [this] {
     refresh_controllers();
@@ -82,6 +87,7 @@ QWidget *MainWindow::build_banner() {
 
   banner_ = new QWidget(this);
   auto *layout = new QHBoxLayout(banner_);
+  layout->setContentsMargins(0, 0, 0, 0);
   layout->addWidget(warning_icon);
   layout->addWidget(banner_text_, 1);
   layout->addWidget(banner_setup_);
@@ -113,7 +119,7 @@ QWidget *MainWindow::build_controllers_page() {
 
   auto *empty_page = new QWidget(this);
   auto *empty_layout = new QVBoxLayout(empty_page);
-  empty_layout->setSpacing(12);
+  empty_layout->setSpacing(kBlockSpacing);
   empty_layout->addStretch(1);
   empty_layout->addWidget(logo);
   empty_layout->addWidget(title);
@@ -125,11 +131,12 @@ QWidget *MainWindow::build_controllers_page() {
   connect(add_card_, &QAbstractButton::clicked, this, [this] { open_setup(); });
   card_area_ = new QWidget(this);
   card_grid_ = new QGridLayout;
-  card_grid_->setSpacing(12);
+  card_grid_->setSpacing(kBlockSpacing);
   for (int column = 0; column < kCardColumns; ++column) {
     card_grid_->setColumnStretch(column, 1);
   }
   auto *card_layout = new QVBoxLayout(card_area_);
+  card_layout->setContentsMargins(0, 0, 0, 0);
   card_layout->addLayout(card_grid_);
   card_layout->addStretch(1);
   auto *scroll = new QScrollArea(this);
@@ -144,18 +151,40 @@ QWidget *MainWindow::build_controllers_page() {
   return controller_pages_;
 }
 
-void MainWindow::build_health_strip() {
+QWidget *MainWindow::build_health_strip() {
   service_check_ = new QLabel(this);
   kernel_check_ = new QLabel(this);
   bluetooth_check_ = new QLabel(this);
-  for (QLabel *check : {service_check_, kernel_check_, bluetooth_check_}) {
-    statusBar()->addWidget(check);
-  }
-  auto *diagnostics = new QPushButton("Diagnostics", this);
-  diagnostics->setFlat(true);
-  connect(diagnostics, &QPushButton::clicked, this,
+  message_ = new QLabel(this);
+  message_->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+  // A long message is cut off instead of widening the window.
+  message_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+  // A link, not a button: text lines up with the card edges, padding does not.
+  auto *diagnostics = new QLabel(
+      QString("<a href=\"#\" style=\"color:%1; text-decoration:none\">"
+              "Diagnostics</a>")
+          .arg(palette().color(QPalette::Highlight).name()),
+      this);
+  diagnostics->setTextInteractionFlags(Qt::LinksAccessibleByMouse |
+                                       Qt::LinksAccessibleByKeyboard);
+  connect(diagnostics, &QLabel::linkActivated, this,
           [this] { open_diagnostics(); });
-  statusBar()->addPermanentWidget(diagnostics);
+
+  auto *strip = new QWidget(this);
+  auto *layout = new QHBoxLayout(strip);
+  layout->setContentsMargins(0, 0, 0, 0);
+  layout->setSpacing(kWindowMargin);
+  layout->addWidget(service_check_);
+  layout->addWidget(kernel_check_);
+  layout->addWidget(bluetooth_check_);
+  layout->addWidget(message_, 1);
+  layout->addWidget(diagnostics);
+  return strip;
+}
+
+void MainWindow::show_message(const QString &text) {
+  message_->setText(text);
+  message_timer_.start(kStatusMessageMs);
 }
 
 void MainWindow::build_menus() {
@@ -386,7 +415,8 @@ QString MainWindow::system_info() const {
               : controller.error.isEmpty() ? "not connected"
                                            : "error: " + controller.error);
     if (!controller.firmware.isEmpty()) {
-      facts << "firmware " + controller.firmware;
+      facts << "firmware " + controller.firmware + " (build " +
+                   controller.firmware_build + ")";
     }
     if (controller.battery) {
       facts << "battery " + QString::number(*controller.battery) + "%";
@@ -444,7 +474,7 @@ void MainWindow::remove_controller(const QString &address) {
       detach_request(address),
       [this, address](const QByteArray &reply) {
         parse_detach_reply(reply);
-        statusBar()->showMessage("Removed " + address + ".", kStatusMessageMs);
+        show_message("Removed " + address + ".");
         refresh_controllers();
       },
       [this](const QString &error) {
@@ -457,9 +487,7 @@ void MainWindow::test_controller(const QString &address) {
       buzz_request(address),
       [this, address](const QByteArray &reply) {
         parse_buzz_reply(reply);
-        statusBar()->showMessage("Sent a test buzz to " + name_of(address) +
-                                     ".",
-                                 kStatusMessageMs);
+        show_message("Sent a test buzz to " + name_of(address) + ".");
       },
       [this](const QString &error) {
         show_action_error("Test haptics", error);
@@ -472,7 +500,7 @@ void MainWindow::apply_assignment(const ControllerAssignment &assignment) {
       [this, address = assignment.address](const QByteArray &reply) {
         (void)parse_attach_reply(reply);
         refresh_controllers();
-        statusBar()->showMessage("Saved " + address + ".", kStatusMessageMs);
+        show_message("Saved " + address + ".");
       },
       [this](const QString &error) {
         show_action_error("Save controller", error);

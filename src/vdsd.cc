@@ -2372,6 +2372,11 @@ void handle_control_client(int control_fd, std::span<VirtualPort> ports,
                                 ? find_port_index(ports, controller.device)
                                 : std::nullopt;
     const VirtualPort *port = port_index ? &ports[*port_index] : nullptr;
+    const auto firmware =
+        port && port->feature_cached[vds::kFirmwareInfoReportId]
+            ? vds::usb_firmware_info(
+                  port->feature_cache[vds::kFirmwareInfoReportId])
+            : std::nullopt;
     controller_statuses.push_back(vds::VdsdControlControllerStatus{
         .address = controller.config.address,
         .connected = controller.virtual_connected,
@@ -2383,11 +2388,10 @@ void handle_control_client(int control_fd, std::span<VirtualPort> ports,
         .charging = port && port->battery && port->battery->charging,
         .headset = port && port->headset_plugged,
         .mic_muted = port && port->mic_muted,
-        .firmware =
-            port && port->feature_cached[vds::kFirmwareInfoReportId]
-                ? vds::usb_firmware_version(
-                      port->feature_cache[vds::kFirmwareInfoReportId])
-                : std::nullopt,
+        .firmware = firmware ? std::optional(firmware->update_version)
+                             : std::nullopt,
+        .firmware_build =
+            firmware ? std::optional(firmware->version) : std::nullopt,
         .audio_busy = port && (port->audio_out_stream_active ||
                                port->speaker_waveout_active),
     });

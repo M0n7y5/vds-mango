@@ -62,6 +62,7 @@ constexpr std::size_t kBtInputMinimumSize =
     kBtInputUsbPayloadOffset + VDS_USB_INPUT_PAYLOAD_SIZE;
 constexpr std::size_t kUsbInputBatteryOffset = 53;
 constexpr std::size_t kFirmwareVersionOffset = 28;
+constexpr std::size_t kFirmwareUpdateVersionOffset = 44;
 constexpr std::size_t kBtMicOpusOffset = 4;
 constexpr std::uint8_t kBtInputPayloadTypeMask = 0x0f;
 constexpr std::uint8_t kBtInputPayloadTypeControl = 0x01;
@@ -503,19 +504,26 @@ std::optional<BatteryState> usb_input_battery(const UsbInputReport &report) {
   }
 }
 
-std::optional<std::uint32_t>
-usb_firmware_version(std::span<const std::uint8_t> feature_report) {
-  if (feature_report.size() < kFirmwareVersionOffset + sizeof(std::uint32_t) ||
+std::optional<FirmwareInfo>
+usb_firmware_info(std::span<const std::uint8_t> feature_report) {
+  if (feature_report.size() <
+          kFirmwareUpdateVersionOffset + sizeof(std::uint16_t) ||
       feature_report[0] != kFirmwareInfoReportId) {
     return std::nullopt;
   }
-  std::uint32_t version = 0;
-  for (std::size_t byte = 0; byte < sizeof(version); ++byte) {
-    version |= static_cast<std::uint32_t>(
-                   feature_report[kFirmwareVersionOffset + byte])
+  const auto little_endian = [&](std::size_t offset, std::size_t bytes) {
+    std::uint32_t value = 0;
+    for (std::size_t byte = 0; byte < bytes; ++byte) {
+      value |= static_cast<std::uint32_t>(feature_report[offset + byte])
                << (8 * byte);
-  }
-  return version;
+    }
+    return value;
+  };
+  return FirmwareInfo{
+      .version = little_endian(kFirmwareVersionOffset, sizeof(std::uint32_t)),
+      .update_version = static_cast<std::uint16_t>(little_endian(
+          kFirmwareUpdateVersionOffset, sizeof(std::uint16_t))),
+  };
 }
 
 BtInputPayloadType bt_input_payload_type(std::span<const std::uint8_t> packet) {
