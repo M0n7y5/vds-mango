@@ -53,6 +53,12 @@ struct AudioChunk {
   bool has_haptics_signal = false;
 };
 
+struct BatteryState {
+  unsigned percent = 0;
+  /// On the cable: charging or full.
+  bool charging = false;
+};
+
 void fill_output_report_checksum(std::span<std::uint8_t> report);
 void fill_feature_report_checksum(std::span<std::uint8_t> report);
 std::vector<std::uint8_t>
@@ -62,6 +68,8 @@ std::optional<std::span<const std::uint8_t, kMicOpusSize>>
 bt_mic_opus_payload(std::span<const std::uint8_t> packet);
 std::optional<UsbInputReport>
 bt_input_to_usb_input(std::span<const std::uint8_t> packet);
+/// Empty while the controller reports a charging fault.
+std::optional<BatteryState> usb_input_battery(const UsbInputReport &report);
 std::optional<std::vector<std::uint8_t>>
 bt_feature_to_usb_feature_reply(std::span<const std::uint8_t> packet);
 

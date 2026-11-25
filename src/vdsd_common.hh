@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <functional>
 #include <iosfwd>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -34,6 +35,11 @@ struct VdsdControlControllerStatus {
   bool connected = false;
   std::string path;
   std::string error;
+  /// Live state of a connected controller. No battery level means unknown.
+  std::optional<unsigned> battery_percent = std::nullopt;
+  bool charging = false;
+  bool headset = false;
+  bool mic_muted = false;
 };
 
 struct VdsdControlPortStatus {

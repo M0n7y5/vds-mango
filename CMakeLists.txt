@@ -204,8 +204,8 @@ add_executable(
   src/gui/vds_mango.cc
   src/gui/bluez.cc
   src/gui/control_client.cc
+  src/gui/controller_card.cc
   src/gui/controller_dialog.cc
-  src/gui/controller_model.cc
   src/gui/main_window.cc
   src/gui/setup_helper.cc
   src/gui/setup_wizard.cc)
@@ -220,8 +220,11 @@ target_link_libraries(
           Qt6::DBus
           Qt6::Network
           Qt6::Widgets)
-qt_add_resources(vds-mango "icons" PREFIX "/icons" BASE "data/icons"
-                 FILES data/icons/vds-mango.svg)
+qt_add_resources(
+  vds-mango "icons" PREFIX "/icons" BASE "data/icons"
+  FILES data/icons/vds-mango.svg data/icons/dualsense.svg
+        data/icons/dualsense-edge.svg data/icons/headset.svg
+        data/icons/microphone.svg data/icons/microphone-muted.svg)
 
 set(VDS_POLKIT_POLICY
     ${CMAKE_CURRENT_BINARY_DIR}/io.github.m0n7y5.vds-mango.policy)

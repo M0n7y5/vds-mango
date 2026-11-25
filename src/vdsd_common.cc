@@ -232,6 +232,16 @@ std::string format_control_list_reply(
     reply += ',';
     reply += jsonl_string_field(
         "audio_buffer", std::to_string(controller.audio_buffer_length));
+    const auto battery = status ? status->battery_percent : std::nullopt;
+    reply += ',';
+    reply +=
+        jsonl_string_field("battery", battery ? std::to_string(*battery) : "");
+    reply += ',';
+    reply += jsonl_bool_field("charging", status && status->charging);
+    reply += ',';
+    reply += jsonl_bool_field("headset", status && status->headset);
+    reply += ',';
+    reply += jsonl_bool_field("mic_muted", status && status->mic_muted);
     reply += "}\n";
   }
   return reply;

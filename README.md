@@ -120,9 +120,10 @@ controllers in `/var/lib/vds` and the log.
 
 ## Graphical app
 
-Besides the wizard, `vds-mango` lists the registered controllers with their
-connection state, changes which controller model games see and which virtual
-ports a controller may use, removes controllers, and toggles trace logging.
+Besides the wizard, `vds-mango` shows a card for each registered controller
+with its connection state and battery level, changes which controller model
+games see and which virtual ports a controller may use, removes controllers,
+and toggles trace logging.
 
 Edit also sets, per controller, how much audio the controller queues before
 it plays haptics and speaker sound. Smaller values react sooner; too small
@@ -219,7 +220,7 @@ virtual port.
 - `libudev` (finding the controller's Bluetooth side)
 - `libsystemd` (who is logged in at the computer, sleep announcements)
 - `libdbus-1` (BlueZ device metadata)
-- `qt6-base` (graphical app)
+- `qt6-base` and `qt6-svg` (graphical app)
 - `polkit` (password prompt of the setup wizard)
 
 #### Build Dependencies
@@ -231,7 +232,7 @@ virtual port.
 
 ```sh
 sudo pacman -S git base-devel cmake pkgconf
-sudo pacman -S opus systemd dbus qt6-base polkit
+sudo pacman -S opus systemd dbus qt6-base qt6-svg polkit
 ```
 
 `vdsd` needs the kernel's USB/IP host controller, which Arch and CachyOS

@@ -1,29 +1,30 @@
 // SPDX-License-Identifier: MIT
 // Copyright (C) 2026 M0n7y5 <17201053+M0n7y5@users.noreply.github.com>
 
+#include <algorithm>
 #include <utility>
 
-#include <QAction>
 #include <QApplication>
 #include <QCheckBox>
+#include <QFont>
+#include <QGridLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
-#include <QHash>
-#include <QHeaderView>
 #include <QIcon>
-#include <QItemSelectionModel>
+#include <QKeySequence>
 #include <QLabel>
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QScrollArea>
+#include <QStackedWidget>
 #include <QStatusBar>
 #include <QStyle>
 #include <QTabWidget>
-#include <QTableView>
-#include <QToolBar>
 #include <QVBoxLayout>
 
+#include "controller_card.hh"
 #include "controller_dialog.hh"
 #include "main_window.hh"
 #include "setup_wizard.hh"
@@ -34,13 +35,15 @@ namespace {
 
 constexpr int kPollIntervalMs = 2000;
 constexpr int kStatusMessageMs = 8000;
+constexpr int kCardColumns = 2;
+constexpr int kLogoSize = 96;
 
 } // namespace
 
 MainWindow::MainWindow(const QString &socket_path)
     : socket_path_(socket_path), client_(socket_path) {
   setWindowTitle("vDS Mango");
-  resize(900, 460);
+  resize(900, 520);
 
   tabs_ = new QTabWidget(this);
   tabs_->addTab(build_controllers_page(), "Controllers");
@@ -53,7 +56,6 @@ MainWindow::MainWindow(const QString &socket_path)
   setCentralWidget(central);
 
   build_menus();
-  update_actions();
   statusBar();
 
   connect(&poll_timer_, &QTimer::timeout, this,
@@ -81,63 +83,58 @@ QWidget *MainWindow::build_banner() {
 }
 
 QWidget *MainWindow::build_controllers_page() {
-  auto *add_action =
-      new QAction(QIcon::fromTheme("list-add"), "Add controller", this);
-  edit_action_ = new QAction(QIcon::fromTheme("document-edit"), "Edit", this);
-  remove_action_ = new QAction(QIcon::fromTheme("list-remove"), "Remove", this);
-  auto *refresh_action =
-      new QAction(QIcon::fromTheme("view-refresh"), "Refresh", this);
-  refresh_action->setShortcut(QKeySequence::Refresh);
-  remove_action_->setShortcut(QKeySequence::Delete);
+  auto *logo = new QLabel(this);
+  logo->setPixmap(
+      QIcon(":/icons/vds-mango.svg")
+          .pixmap(QSize(kLogoSize, kLogoSize), devicePixelRatioF()));
+  logo->setAlignment(Qt::AlignCenter);
+  auto *title = new QLabel("No controllers yet", this);
+  QFont title_font = title->font();
+  title_font.setBold(true);
+  title_font.setPointSizeF(title_font.pointSizeF() * 1.3);
+  title->setFont(title_font);
+  title->setAlignment(Qt::AlignCenter);
+  auto *hint = new QLabel("Add a DualSense and games see it as a USB "
+                          "controller, with haptics, adaptive triggers and "
+                          "audio.",
+                          this);
+  hint->setWordWrap(true);
+  hint->setAlignment(Qt::AlignCenter);
+  auto *add_button =
+      new QPushButton(QIcon::fromTheme("list-add"), "Add controller", this);
+  connect(add_button, &QPushButton::clicked, this, [this] { open_setup(); });
 
-  connect(add_action, &QAction::triggered, this, [this] { open_setup(); });
-  connect(edit_action_, &QAction::triggered, this,
-          [this] { edit_controller(); });
-  connect(remove_action_, &QAction::triggered, this,
-          [this] { remove_controller(); });
-  connect(refresh_action, &QAction::triggered, this, [this] {
-    refresh_controllers();
-    refresh_names();
-    refresh_trace();
-  });
+  auto *empty_page = new QWidget(this);
+  auto *empty_layout = new QVBoxLayout(empty_page);
+  empty_layout->setSpacing(12);
+  empty_layout->addStretch(1);
+  empty_layout->addWidget(logo);
+  empty_layout->addWidget(title);
+  empty_layout->addWidget(hint);
+  empty_layout->addWidget(add_button, 0, Qt::AlignCenter);
+  empty_layout->addStretch(2);
 
-  auto *toolbar = new QToolBar(this);
-  toolbar->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
-  toolbar->addAction(add_action);
-  toolbar->addAction(edit_action_);
-  toolbar->addAction(remove_action_);
-  toolbar->addSeparator();
-  toolbar->addAction(refresh_action);
+  add_card_ = new AddControllerCard(this);
+  connect(add_card_, &QAbstractButton::clicked, this, [this] { open_setup(); });
+  card_area_ = new QWidget(this);
+  card_grid_ = new QGridLayout;
+  card_grid_->setSpacing(12);
+  for (int column = 0; column < kCardColumns; ++column) {
+    card_grid_->setColumnStretch(column, 1);
+  }
+  auto *card_layout = new QVBoxLayout(card_area_);
+  card_layout->addLayout(card_grid_);
+  card_layout->addStretch(1);
+  auto *scroll = new QScrollArea(this);
+  scroll->setWidget(card_area_);
+  scroll->setWidgetResizable(true);
+  scroll->setFrameShape(QFrame::NoFrame);
 
-  table_ = new QTableView(this);
-  table_->setModel(&model_);
-  table_->setSelectionBehavior(QAbstractItemView::SelectRows);
-  table_->setSelectionMode(QAbstractItemView::SingleSelection);
-  table_->setEditTriggers(QAbstractItemView::NoEditTriggers);
-  table_->setAlternatingRowColors(true);
-  table_->setShowGrid(false);
-  table_->verticalHeader()->hide();
-  table_->horizontalHeader()->setSectionResizeMode(
-      QHeaderView::ResizeToContents);
-  table_->horizontalHeader()->setSectionResizeMode(
-      ControllerModel::StatusColumn, QHeaderView::Stretch);
-  connect(table_->selectionModel(), &QItemSelectionModel::selectionChanged,
-          this, [this] { update_actions(); });
-  connect(table_, &QTableView::doubleClicked, this,
-          [this] { edit_controller(); });
-
-  empty_hint_ = new QLabel(
-      "No controllers yet. Choose Add controller to pair and add a DualSense.",
-      this);
-  empty_hint_->setWordWrap(true);
-  empty_hint_->hide();
-
-  auto *page = new QWidget(this);
-  auto *layout = new QVBoxLayout(page);
-  layout->addWidget(toolbar);
-  layout->addWidget(table_, 1);
-  layout->addWidget(empty_hint_);
-  return page;
+  controller_pages_ = new QStackedWidget(this);
+  controller_pages_->addWidget(empty_page);
+  controller_pages_->addWidget(scroll);
+  rebuild_cards();
+  return controller_pages_;
 }
 
 QWidget *MainWindow::build_diagnostics_page() {
@@ -179,6 +176,12 @@ QWidget *MainWindow::build_diagnostics_page() {
 void MainWindow::build_menus() {
   auto *setup_menu = menuBar()->addMenu("Setup");
   setup_menu->addAction("Run setup…", this, [this] { open_setup(); });
+  setup_menu->addAction(QIcon::fromTheme("view-refresh"), "Refresh",
+                        QKeySequence::Refresh, this, [this] {
+                          refresh_controllers();
+                          refresh_names();
+                          refresh_trace();
+                        });
   auto *help_menu = menuBar()->addMenu("Help");
   help_menu->addAction("About vDS Mango", this, [this] { show_about(); });
 }
@@ -205,11 +208,11 @@ void MainWindow::refresh_names() {
   client_.send(
       list_targets_request(),
       [this](const QByteArray &reply) {
-        QHash<QString, QString> names;
+        names_.clear();
         for (const PairedController &target : parse_list_targets_reply(reply)) {
-          names.insert(target.address, target.name);
+          names_.insert(target.address, target.name);
         }
-        model_.set_names(std::move(names));
+        update_cards();
       },
       [](const QString &) {});
 }
@@ -222,24 +225,64 @@ void MainWindow::refresh_trace() {
 }
 
 void MainWindow::show_controllers(std::vector<ControllerStatus> controllers) {
-  const QString selected = selected_address();
-  model_.set_controllers(std::move(controllers));
-  if (!selected.isEmpty() && selected_address().isEmpty()) {
-    const int row = model_.row_of(selected);
-    if (row >= 0) {
-      table_->selectRow(row);
-    }
+  const auto same_address = [](const ControllerStatus &left,
+                               const ControllerStatus &right) {
+    return left.address == right.address;
+  };
+  const bool same_cards =
+      std::equal(controllers.begin(), controllers.end(), controllers_.begin(),
+                 controllers_.end(), same_address);
+  controllers_ = std::move(controllers);
+  if (!same_cards) {
+    rebuild_cards();
   }
-  empty_hint_->setVisible(model_.rowCount() == 0);
+  update_cards();
+  controller_pages_->setCurrentIndex(controllers_.empty() ? 0 : 1);
 
-  bool fix_missing = false;
-  for (int row = 0; row < model_.rowCount(); ++row) {
-    fix_missing = fix_missing || kernel_fix_missing(model_.controller(row));
-  }
+  const bool fix_missing = std::any_of(controllers_.begin(), controllers_.end(),
+                                       kernel_fix_missing);
   kernel_problem_ =
       fix_missing ? "This kernel cannot share controllers with Bluetooth. " +
                         kKernelRequirement
                   : QString();
+}
+
+void MainWindow::rebuild_cards() {
+  for (ControllerCard *card : cards_) {
+    card_grid_->removeWidget(card);
+    card->deleteLater();
+  }
+  cards_.clear();
+  card_grid_->removeWidget(add_card_);
+
+  const auto place = [this](QWidget *widget) {
+    const int index = card_grid_->count();
+    card_grid_->addWidget(widget, index / kCardColumns, index % kCardColumns,
+                          Qt::AlignTop);
+  };
+  for (const ControllerStatus &controller : controllers_) {
+    const QString address = controller.address;
+    auto *card = new ControllerCard(
+        [this, address] {
+          QTimer::singleShot(0, this,
+                             [this, address] { edit_controller(address); });
+        },
+        [this, address] {
+          QTimer::singleShot(0, this,
+                             [this, address] { remove_controller(address); });
+        },
+        card_area_);
+    place(card);
+    cards_.push_back(card);
+  }
+  place(add_card_);
+}
+
+void MainWindow::update_cards() {
+  for (std::size_t index = 0; index < cards_.size(); ++index) {
+    cards_[index]->show_controller(controllers_[index],
+                                   name_of(controllers_[index].address));
+  }
 }
 
 void MainWindow::show_trace(const TraceScopes &scopes) {
@@ -254,15 +297,11 @@ void MainWindow::show_daemon_error(const QString &error) {
   daemon_known_ = true;
   daemon_error_ = error;
   tabs_->setEnabled(error.isEmpty());
-  if (!error.isEmpty()) {
-    empty_hint_->hide();
-  }
   if (became_reachable) {
     refresh_names();
     refresh_trace();
   }
   update_banner();
-  update_actions();
   offer_setup_once();
 }
 
@@ -279,27 +318,19 @@ void MainWindow::update_banner() {
   banner_->setVisible(!text.isEmpty());
 }
 
-void MainWindow::update_actions() {
-  const bool editable = daemon_error_.isEmpty() && !selected_address().isEmpty();
-  edit_action_->setEnabled(editable);
-  remove_action_->setEnabled(editable);
-}
-
 void MainWindow::offer_setup_once() {
   if (setup_offered_ || !daemon_known_) {
     return;
   }
   setup_offered_ = true;
-  if (!daemon_error_.isEmpty() || model_.rowCount() == 0) {
+  if (!daemon_error_.isEmpty() || controllers_.empty()) {
     // Queued so the dialog's event loop does not run inside a reply handler.
     QTimer::singleShot(0, this, [this] { open_setup(); });
   }
 }
 
-QString MainWindow::selected_address() const {
-  const QModelIndexList rows = table_->selectionModel()->selectedRows();
-  return rows.isEmpty() ? QString()
-                        : model_.controller(rows.first().row()).address;
+QString MainWindow::name_of(const QString &address) const {
+  return names_.value(address, "DualSense controller");
 }
 
 void MainWindow::open_setup() {
@@ -309,26 +340,25 @@ void MainWindow::open_setup() {
   refresh_names();
 }
 
-void MainWindow::edit_controller() {
-  const int row = model_.row_of(selected_address());
-  if (row < 0 || !daemon_error_.isEmpty()) {
+void MainWindow::edit_controller(const QString &address) {
+  const auto found = std::find_if(controllers_.begin(), controllers_.end(),
+                                  [&](const ControllerStatus &candidate) {
+                                    return candidate.address == address;
+                                  });
+  if (found == controllers_.end() || !daemon_error_.isEmpty()) {
     return;
   }
-  const ControllerStatus controller = model_.controller(row);
-  ControllerDialog dialog(controller, model_.name(controller.address), this);
+  const ControllerStatus controller = *found;
+  ControllerDialog dialog(controller, name_of(address), this);
   if (dialog.exec() == QDialog::Accepted) {
     apply_assignment(dialog.assignment());
   }
 }
 
-void MainWindow::remove_controller() {
-  const QString address = selected_address();
-  if (address.isEmpty()) {
-    return;
-  }
+void MainWindow::remove_controller(const QString &address) {
   QMessageBox confirm(
       QMessageBox::Question, "Remove controller",
-      "Remove " + model_.name(address) + " (" + address +
+      "Remove " + name_of(address) + " (" + address +
           ")?\n\nIt disconnects from the virtual USB port and stays paired "
           "in Bluetooth.",
       QMessageBox::Cancel, this);

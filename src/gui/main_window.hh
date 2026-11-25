@@ -4,22 +4,25 @@
 
 #include <vector>
 
+#include <QHash>
 #include <QMainWindow>
 #include <QString>
 #include <QTimer>
 
 #include "control_client.hh"
 #include "control_protocol.hh"
-#include "controller_model.hh"
 
-class QAction;
 class QCheckBox;
+class QGridLayout;
 class QLabel;
 class QPushButton;
+class QStackedWidget;
 class QTabWidget;
-class QTableView;
 
 namespace vds::gui {
+
+class AddControllerCard;
+class ControllerCard;
 
 class MainWindow : public QMainWindow {
 public:
@@ -35,24 +38,26 @@ private:
   void refresh_names();
   void refresh_trace();
   void show_controllers(std::vector<ControllerStatus> controllers);
+  void rebuild_cards();
+  void update_cards();
   void show_trace(const TraceScopes &scopes);
   void show_daemon_error(const QString &error);
   void show_action_error(const QString &title, const QString &error);
   void update_banner();
-  void update_actions();
   void offer_setup_once();
-  QString selected_address() const;
+  QString name_of(const QString &address) const;
 
   void open_setup();
-  void edit_controller();
-  void remove_controller();
+  void edit_controller(const QString &address);
+  void remove_controller(const QString &address);
   void apply_assignment(const ControllerAssignment &assignment);
   void set_trace(const QString &scope, bool enabled);
   void show_about();
 
   QString socket_path_;
   ControlClient client_;
-  ControllerModel model_;
+  std::vector<ControllerStatus> controllers_;
+  QHash<QString, QString> names_;
   QTimer poll_timer_;
   QString daemon_error_;
   QString kernel_problem_;
@@ -64,10 +69,12 @@ private:
   QLabel *banner_text_ = nullptr;
   QPushButton *banner_setup_ = nullptr;
   QTabWidget *tabs_ = nullptr;
-  QTableView *table_ = nullptr;
-  QLabel *empty_hint_ = nullptr;
-  QAction *edit_action_ = nullptr;
-  QAction *remove_action_ = nullptr;
+  /// The empty state, or the cards once a controller is registered.
+  QStackedWidget *controller_pages_ = nullptr;
+  QWidget *card_area_ = nullptr;
+  QGridLayout *card_grid_ = nullptr;
+  std::vector<ControllerCard *> cards_;
+  AddControllerCard *add_card_ = nullptr;
   QCheckBox *trace_input_control_ = nullptr;
   QCheckBox *trace_input_audio_ = nullptr;
   QCheckBox *trace_output_ = nullptr;

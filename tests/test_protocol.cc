@@ -66,14 +66,45 @@ void test_bt_input_accepts_minimum_frame() {
                       (*converted)[63], static_cast<std::uint8_t>(0x4e));
 }
 
+UsbInputReport input_report_with_battery_byte(std::uint8_t status) {
+  UsbInputReport report{};
+  report[0] = 0x01;
+  report[53] = status;
+  return report;
+}
+
+void test_battery_level_counts_ten_percent_steps() {
+  const auto battery = usb_input_battery(input_report_with_battery_byte(0x08));
+  VDS_CHECK(battery.has_value());
+  VDS_CHECK_EQ(battery->percent, 85u);
+  VDS_CHECK_EQ(battery->charging, false);
+}
+
+void test_battery_on_the_cable_reports_charging() {
+  const auto battery = usb_input_battery(input_report_with_battery_byte(0x13));
+  VDS_CHECK(battery.has_value());
+  VDS_CHECK_EQ(battery->percent, 35u);
+  VDS_CHECK_EQ(battery->charging, true);
+}
+
+void test_battery_charging_fault_reports_no_level() {
+  VDS_CHECK(!usb_input_battery(input_report_with_battery_byte(0xa4)));
+}
+
 void run_tests() {
 #if defined(VDS_TEST_L12)
   test_bt_input_accepts_minimum_frame();
+  test_battery_level_counts_ten_percent_steps();
+  test_battery_on_the_cable_reports_charging();
+  test_battery_charging_fault_reports_no_level();
 #elif defined(VDS_TEST_L11C)
   test_feature_set_packet_keeps_payload_tail();
 #else
   test_feature_set_packet_keeps_payload_tail();
   test_bt_input_accepts_minimum_frame();
+  test_battery_level_counts_ten_percent_steps();
+  test_battery_on_the_cable_reports_charging();
+  test_battery_charging_fault_reports_no_level();
 #endif
 }
 

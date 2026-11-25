@@ -152,6 +152,7 @@ QByteArray trace_request(const QString &scope, bool enabled) {
 std::vector<ControllerStatus> parse_list_reply(const QByteArray &reply) {
   std::vector<ControllerStatus> controllers;
   for (const QJsonObject &object : reply_objects(reply)) {
+    const QString battery = require_string(object, "battery");
     controllers.push_back(ControllerStatus{
         .address = require_string(object, "address"),
         .connected = require_bool(object, "connected"),
@@ -160,6 +161,11 @@ std::vector<ControllerStatus> parse_list_reply(const QByteArray &reply) {
         .profile = require_profile(object),
         .ports = require_ports(object),
         .audio_buffer = require_string(object, "audio_buffer").toUInt(),
+        .battery = battery.isEmpty() ? std::nullopt
+                                     : std::optional(battery.toUInt()),
+        .charging = require_bool(object, "charging"),
+        .headset = require_bool(object, "headset"),
+        .mic_muted = require_bool(object, "mic_muted"),
     });
   }
   return controllers;

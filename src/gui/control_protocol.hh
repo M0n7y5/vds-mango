@@ -20,6 +20,11 @@ struct ControllerStatus {
   ControllerProfile profile = ControllerProfile::Unspecified;
   std::vector<unsigned> ports;
   unsigned audio_buffer = 0;
+  /// Live state of a connected controller. No battery level means unknown.
+  std::optional<unsigned> battery = std::nullopt;
+  bool charging = false;
+  bool headset = false;
+  bool mic_muted = false;
 };
 
 struct PairedController {

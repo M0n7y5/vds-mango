@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="160" height="112" viewBox="0 0 160 112">
+  <title>DualSense Edge</title>
+  <g fill="none" stroke="#000000" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M38 14 C30 14 22 18 18 28 L6 80 C3 94 10 102 20 100 C28 98 34 90 40 80 L46 74 L114 74 L120 80 C126 90 132 98 140 100 C150 102 157 94 154 80 L142 28 C138 18 130 14 122 14 Z"/>
+    <path d="M56 14 V32 Q56 40 64 40 H96 Q104 40 104 32 V14 Z" fill="#000000"/>
+    <circle cx="58" cy="55" r="9"/>
+    <circle cx="102" cy="55" r="9"/>
+    <path d="M52 69 H64 M96 69 H108"/>
+    <path d="M34 30 V46 M26 38 H42"/>
+    <path d="M48 20 V26 M112 20 V26"/>
+  </g>
+  <g fill="#000000">
+    <circle cx="126" cy="29" r="3.2"/>
+    <circle cx="126" cy="47" r="3.2"/>
+    <circle cx="117" cy="38" r="3.2"/>
+    <circle cx="135" cy="38" r="3.2"/>
+    <circle cx="80" cy="55" r="3.5"/>
+  </g>
+</svg>

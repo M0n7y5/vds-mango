@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <exception>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <QByteArray>
@@ -28,6 +29,11 @@ public:
       : db_path_(directory_.filePath("vdsd.db").toStdString()),
         logger_(directory_.filePath("vdsd.log").toStdString()) {}
 
+  /// What vdsd would report for a controller that is connected right now.
+  void connect(vds::VdsdControlControllerStatus status) {
+    statuses_.push_back(std::move(status));
+  }
+
   QByteArray handle(const QByteArray &request) {
     static const std::vector<vds::VdsdControlPortStatus> kPorts = {
         {.port = 0,
@@ -43,7 +49,7 @@ public:
     };
     bool reload_requested = false;
     const std::string reply = vds::handle_vdsd_control_command(
-        vds::trim_command(request.toStdString()), db_path_, {}, kPorts,
+        vds::trim_command(request.toStdString()), db_path_, statuses_, kPorts,
         [] {
           return std::vector<vds::ControllerTarget>{{
               .address = "aa:bb:cc:dd:ee:01",
@@ -62,6 +68,7 @@ private:
   std::string db_path_;
   vds::Logger logger_;
   std::uint32_t trace_flags_ = 0;
+  std::vector<vds::VdsdControlControllerStatus> statuses_;
 };
 
 std::string error_of(Daemon &daemon, const QByteArray &request,
@@ -222,6 +229,40 @@ void test_unmeasured_audio_buffer_surfaces_the_daemon_error_text() {
                std::string("audio buffer must be 16, 24, 32 or 64"));
 }
 
+void test_battery_of_a_connected_controller_reaches_the_gui() {
+  Daemon daemon;
+  (void)daemon.handle(vds::gui::attach_request({
+      .address = "aa:bb:cc:dd:ee:01",
+      .profile = vds::ControllerProfile::Unspecified,
+      .ports = {},
+  }));
+  daemon.connect({
+      .address = "aa:bb:cc:dd:ee:01",
+      .connected = true,
+      .path = "vds0",
+      .error = "",
+      .battery_percent = 85,
+      .charging = true,
+  });
+  const auto controller =
+      vds::gui::parse_list_reply(daemon.handle(vds::gui::list_request())).at(0);
+  VDS_CHECK(controller.battery.has_value());
+  VDS_CHECK_EQ(*controller.battery, 85u);
+  VDS_CHECK_EQ(controller.charging, true);
+}
+
+void test_controller_that_is_off_lists_no_battery_level() {
+  Daemon daemon;
+  (void)daemon.handle(vds::gui::attach_request({
+      .address = "aa:bb:cc:dd:ee:01",
+      .profile = vds::ControllerProfile::Unspecified,
+      .ports = {},
+  }));
+  VDS_CHECK(!vds::gui::parse_list_reply(daemon.handle(vds::gui::list_request()))
+                 .at(0)
+                 .battery.has_value());
+}
+
 void run_tests() {
   test_daemon_accepts_the_attach_request_and_gui_reads_the_reply();
   test_listed_controller_keeps_the_attached_profile_and_ports();
@@ -233,6 +274,8 @@ void run_tests() {
   test_chosen_audio_buffer_is_listed_for_that_controller();
   test_attach_without_an_audio_buffer_keeps_the_saved_one();
   test_unmeasured_audio_buffer_surfaces_the_daemon_error_text();
+  test_battery_of_a_connected_controller_reaches_the_gui();
+  test_controller_that_is_off_lists_no_battery_level();
 }
 
 } // namespace vds::test

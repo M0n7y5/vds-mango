@@ -15,8 +15,8 @@
 #include <QRadioButton>
 #include <QVBoxLayout>
 
+#include "controller_card.hh"
 #include "controller_dialog.hh"
-#include "controller_model.hh"
 
 namespace vds::gui {
 

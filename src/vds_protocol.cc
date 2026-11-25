@@ -60,6 +60,7 @@ constexpr std::size_t kBtInputHeaderOffset = 2;
 constexpr std::size_t kBtInputUsbPayloadOffset = 3;
 constexpr std::size_t kBtInputMinimumSize =
     kBtInputUsbPayloadOffset + VDS_USB_INPUT_PAYLOAD_SIZE;
+constexpr std::size_t kUsbInputBatteryOffset = 53;
 constexpr std::size_t kBtMicOpusOffset = 4;
 constexpr std::uint8_t kBtInputPayloadTypeMask = 0x0f;
 constexpr std::uint8_t kBtInputPayloadTypeControl = 0x01;
@@ -482,6 +483,23 @@ bt_input_to_usb_input(std::span<const std::uint8_t> packet) {
             packet.begin() + static_cast<std::ptrdiff_t>(kBtInputMinimumSize),
             report.begin() + 1);
   return report;
+}
+
+std::optional<BatteryState> usb_input_battery(const UsbInputReport &report) {
+  // Read like hid-playstation does: the low nibble counts 10% steps, the high
+  // nibble is 0 discharging, 1 charging, 2 full and anything else a fault.
+  const std::uint8_t status = report[kUsbInputBatteryOffset];
+  const unsigned percent = std::min((status & 0x0fu) * 10 + 5, 100u);
+  switch (status >> 4) {
+  case 0x0:
+    return BatteryState{.percent = percent, .charging = false};
+  case 0x1:
+    return BatteryState{.percent = percent, .charging = true};
+  case 0x2:
+    return BatteryState{.percent = 100, .charging = true};
+  default:
+    return std::nullopt;
+  }
 }
 
 BtInputPayloadType bt_input_payload_type(std::span<const std::uint8_t> packet) {

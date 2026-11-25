@@ -223,6 +223,7 @@ struct VirtualPort {
   bool mute_button_down = false;
   bool headset_plugged = false;
   bool headset_mic_plugged = false;
+  std::optional<vds::BatteryState> battery;
   bool speaker_waveout_selected = true;
   bool speaker_waveout_active = false;
   std::uint32_t speaker_waveout_phase = 0;
@@ -734,6 +735,7 @@ void reset_virtual_port(VirtualPort &port) {
   port.mute_button_down = false;
   port.headset_plugged = false;
   port.headset_mic_plugged = false;
+  port.battery.reset();
   port.speaker_waveout_selected = true;
   port.speaker_waveout_active = false;
   port.speaker_waveout_phase = 0;
@@ -1285,6 +1287,7 @@ bool handle_bt_input(VirtualPort &port, vds::BtBackend &bt_backend,
     }
   }
 
+  port.battery = vds::usb_input_battery(*report);
   const std::uint8_t headset_status = report->at(kUsbInputHeadsetOffset);
   const bool headset_plugged =
       (headset_status & kUsbInputHeadphonesPluggedMask) != 0;
@@ -2311,11 +2314,21 @@ void handle_control_client(int control_fd, std::span<VirtualPort> ports,
   std::vector<vds::VdsdControlControllerStatus> controller_statuses;
   controller_statuses.reserve(controllers.size());
   for (const auto &controller : controllers) {
+    const auto port_index = controller.virtual_connected
+                                ? find_port_index(ports, controller.device)
+                                : std::nullopt;
+    const VirtualPort *port = port_index ? &ports[*port_index] : nullptr;
     controller_statuses.push_back(vds::VdsdControlControllerStatus{
         .address = controller.config.address,
         .connected = controller.virtual_connected,
         .path = controller.virtual_connected ? controller.device : "",
         .error = controller.virtual_connected ? "" : controller.last_error,
+        .battery_percent = port && port->battery
+                               ? std::optional(port->battery->percent)
+                               : std::nullopt,
+        .charging = port && port->battery && port->battery->charging,
+        .headset = port && port->headset_plugged,
+        .mic_muted = port && port->mic_muted,
     });
   }
 
