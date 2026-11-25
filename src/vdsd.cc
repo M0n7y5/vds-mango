@@ -125,9 +125,15 @@ constexpr std::uint8_t kTestCommandSpeakerParam = 0x08;
 constexpr std::uint32_t kSpeakerWaveoutFrequencyHz = 1000;
 constexpr std::uint32_t kSpeakerWaveoutPeriodFrames =
     VDS_AUDIO_SAMPLE_RATE / kSpeakerWaveoutFrequencyHz;
-constexpr double kSpeakerWaveoutTwoPi = 6.28318530717958647692;
+constexpr double kTwoPi = 6.28318530717958647692;
 /* Arbitrary fixed amplitude used only for synthetic WebHID speaker waveout. */
 constexpr std::int16_t kSpeakerWaveoutAmplitude = 12000;
+/* The buzz of the control command: strong enough to feel, over in 300 ms. */
+constexpr std::uint32_t kTestBuzzFrequencyHz = 150;
+constexpr std::uint32_t kTestBuzzPeriodFrames =
+    VDS_AUDIO_SAMPLE_RATE / kTestBuzzFrequencyHz;
+constexpr std::uint32_t kTestBuzzFrames = VDS_AUDIO_SAMPLE_RATE * 3 / 10;
+constexpr std::int16_t kTestBuzzAmplitude = 24000;
 constexpr std::array<std::uint8_t, 3> kInitialFeatureReportIds = {0x09, 0x20,
                                                                   0x05};
 
@@ -227,6 +233,8 @@ struct VirtualPort {
   bool speaker_waveout_selected = true;
   bool speaker_waveout_active = false;
   std::uint32_t speaker_waveout_phase = 0;
+  std::uint32_t test_buzz_frames_left = 0;
+  std::uint32_t test_buzz_phase = 0;
   std::array<std::vector<std::uint8_t>, 256> feature_cache;
   std::array<bool, 256> feature_cached;
   std::vector<std::uint8_t> pending_feature_reports;
@@ -739,6 +747,7 @@ void reset_virtual_port(VirtualPort &port) {
   port.speaker_waveout_selected = true;
   port.speaker_waveout_active = false;
   port.speaker_waveout_phase = 0;
+  port.test_buzz_frames_left = 0;
   port.feature_cache = {};
   port.feature_cached = {};
   port.pending_feature_reports.clear();
@@ -755,6 +764,7 @@ void disconnect_virtual_port(VirtualPort &port, vds::Logger &logger) {
   port.mute_button_down = false;
   port.speaker_waveout_active = false;
   port.speaker_waveout_phase = 0;
+  port.test_buzz_frames_left = 0;
   try {
     port.usb->disconnect();
     logger.log(vds::LogScope::Usb, vds::LogLevel::Info,
@@ -1839,7 +1849,8 @@ bool has_pending_bt_output(std::span<const VirtualPort> ports,
     if (port_index && (ports[*port_index].pending_bt_state_report ||
                        !ports[*port_index].pending_audio_chunks.empty() ||
                        !ports[*port_index].pending_control_writes.empty() ||
-                       ports[*port_index].speaker_waveout_active)) {
+                       ports[*port_index].speaker_waveout_active ||
+                       ports[*port_index].test_buzz_frames_left > 0)) {
       return true;
     }
   }
@@ -1956,25 +1967,23 @@ bool flush_pending_audio_chunk(VirtualPort &port,
   return true;
 }
 
-void enqueue_speaker_waveout_chunk(VirtualPort &port, std::uint32_t trace_flags,
-                                   vds::Logger &logger) {
-  if (!port.speaker_waveout_active || !port.pending_audio_chunks.empty()) {
-    return;
-  }
+constexpr std::size_t kPcmWindowBytes =
+    vds::kPcmWindowFrames * VDS_AUDIO_CHANNELS * sizeof(std::int16_t);
+using PcmWindow = std::array<std::uint8_t, kPcmWindowBytes>;
 
-  std::array<std::uint8_t,
-             vds::kPcmWindowFrames * VDS_AUDIO_CHANNELS * sizeof(std::int16_t)>
-      pcm{};
+/* A sine on one channel pair of the USB audio format, silence on the other. */
+PcmWindow sine_window(std::size_t first_channel, std::uint32_t period_frames,
+                      std::int16_t amplitude, std::uint32_t &phase) {
+  PcmWindow pcm{};
   for (std::size_t frame = 0; frame < vds::kPcmWindowFrames; ++frame) {
-    const double angle = kSpeakerWaveoutTwoPi *
-                         static_cast<double>(port.speaker_waveout_phase) /
-                         static_cast<double>(kSpeakerWaveoutPeriodFrames);
+    const double angle = kTwoPi * static_cast<double>(phase) /
+                         static_cast<double>(period_frames);
     const auto sample = static_cast<std::int16_t>(
-        std::sin(angle) * static_cast<double>(kSpeakerWaveoutAmplitude));
-    port.speaker_waveout_phase =
-        (port.speaker_waveout_phase + 1) % kSpeakerWaveoutPeriodFrames;
+        std::sin(angle) * static_cast<double>(amplitude));
+    phase = (phase + 1) % period_frames;
 
-    for (std::size_t channel = 0; channel < vds::kSpeakerChannels; ++channel) {
+    for (std::size_t channel = first_channel;
+         channel < first_channel + vds::kSpeakerChannels; ++channel) {
       const std::size_t offset =
           (frame * VDS_AUDIO_CHANNELS + channel) * sizeof(std::int16_t);
       const auto value = static_cast<std::uint16_t>(sample);
@@ -1982,6 +1991,49 @@ void enqueue_speaker_waveout_chunk(VirtualPort &port, std::uint32_t trace_flags,
       pcm[offset + 1] = static_cast<std::uint8_t>((value >> 8) & 0xff);
     }
   }
+  return pcm;
+}
+
+void start_test_buzz(VirtualPort &port, vds::Logger &logger) {
+  port.test_buzz_frames_left = kTestBuzzFrames;
+  port.test_buzz_phase = 0;
+  port.waveout_extractor = vds::PcmAudioExtractor{};
+  /* Each audio packet carries this state, as when a game opens the card. */
+  port.output_state.set_audio_out_stream_active(true, port.headset_plugged);
+  logger.log(vds::LogScope::Output, vds::LogLevel::Info,
+             port.path + " test buzz");
+}
+
+void enqueue_test_buzz_chunk(VirtualPort &port, vds::Logger &logger) {
+  if (port.test_buzz_frames_left == 0 || !port.pending_audio_chunks.empty()) {
+    return;
+  }
+
+  /* The haptics pair follows the speaker pair. */
+  const PcmWindow pcm =
+      sine_window(vds::kSpeakerChannels, kTestBuzzPeriodFrames,
+                  kTestBuzzAmplitude, port.test_buzz_phase);
+  port.test_buzz_frames_left -=
+      std::min(port.test_buzz_frames_left,
+               static_cast<std::uint32_t>(vds::kPcmWindowFrames));
+  try {
+    for (const auto &chunk : port.waveout_extractor.push_usb_audio(pcm)) {
+      port.pending_audio_chunks.push_back(chunk);
+    }
+  } catch (const std::runtime_error &error) {
+    log_audio_encode_failure(port, error, logger);
+  }
+}
+
+void enqueue_speaker_waveout_chunk(VirtualPort &port, std::uint32_t trace_flags,
+                                   vds::Logger &logger) {
+  if (!port.speaker_waveout_active || !port.pending_audio_chunks.empty()) {
+    return;
+  }
+
+  const PcmWindow pcm =
+      sine_window(0, kSpeakerWaveoutPeriodFrames, kSpeakerWaveoutAmplitude,
+                  port.speaker_waveout_phase);
 
   std::vector<vds::AudioChunk> chunks;
   try {
@@ -2029,6 +2081,7 @@ void flush_pending_outputs(std::vector<VirtualPort> &ports,
         continue;
       }
       enqueue_speaker_waveout_chunk(port, trace_flags, logger);
+      enqueue_test_buzz_chunk(port, logger);
       (void)flush_pending_audio_chunk(port, *controller.backend, trace_flags,
                                       controller.config.audio_buffer_length,
                                       logger);
@@ -2335,6 +2388,8 @@ void handle_control_client(int control_fd, std::span<VirtualPort> ports,
                 ? vds::usb_firmware_version(
                       port->feature_cache[vds::kFirmwareInfoReportId])
                 : std::nullopt,
+        .audio_busy = port && (port->audio_out_stream_active ||
+                               port->speaker_waveout_active),
     });
   }
 
@@ -2372,12 +2427,22 @@ void handle_control_client(int control_fd, std::span<VirtualPort> ports,
   const std::vector<vds::VdsdControlPortStatus> port_statuses =
       vds::build_vdsd_control_port_statuses(port_candidates, port_bindings);
 
+  std::string buzz_address;
   reply = vds::handle_vdsd_control_command(
       command, db_path, controller_statuses, port_statuses,
       [] { return vds::list_bluez_controller_targets(); },
       vds::VdsdControlDaemonStatus{.version = vds::kVersion,
                                    .kernel_fix = kernel_fix},
-      trace_flags, reload_requested, logger);
+      trace_flags, reload_requested, buzz_address, logger);
+  for (const auto &controller : controllers) {
+    const auto port_index = controller.virtual_connected &&
+                                    controller.config.address == buzz_address
+                                ? find_port_index(ports, controller.device)
+                                : std::nullopt;
+    if (port_index) {
+      start_test_buzz(ports[*port_index], logger);
+    }
+  }
 
   send_reply(reply);
 }

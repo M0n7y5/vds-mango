@@ -42,6 +42,8 @@ struct VdsdControlControllerStatus {
   bool mic_muted = false;
   /// As hid-playstation prints it, for bug reports.
   std::optional<std::uint32_t> firmware = std::nullopt;
+  /// A game or app is playing through the controller's sound card.
+  bool audio_busy = false;
 };
 
 /// What the daemon knows about itself, for the status command.
@@ -88,12 +90,13 @@ std::vector<VdsdControlPortStatus> build_vdsd_control_port_statuses(
     std::span<const VdsdControlPortCandidate> candidates,
     std::span<const VdsdControlPortBinding> bindings);
 std::string format_control_error_reply(std::string_view error);
+/// buzz_address receives the controller a buzz command wants to vibrate.
 std::string handle_vdsd_control_command(
     std::string_view request, const std::string &db_path,
     std::span<const VdsdControlControllerStatus> controllers,
     std::span<const VdsdControlPortStatus> ports,
     const std::function<std::vector<ControllerTarget>()> &list_targets,
     const VdsdControlDaemonStatus &daemon, std::uint32_t &trace_flags,
-    bool &reload_requested, Logger &logger);
+    bool &reload_requested, std::string &buzz_address, Logger &logger);
 
 } // namespace vds

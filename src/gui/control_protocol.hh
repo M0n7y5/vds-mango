@@ -79,6 +79,8 @@ QByteArray detach_request(const QString &address);
 QByteArray trace_status_request();
 QByteArray trace_request(const QString &scope, bool enabled);
 QByteArray status_request();
+/// Asks vdsd to vibrate a connected controller briefly.
+QByteArray buzz_request(const QString &address);
 
 /// The parsers throw std::runtime_error carrying the daemon's own error text
 /// when the reply is {"OK":false,...}, or a description of the malformed reply.
@@ -88,5 +90,6 @@ AttachResult parse_attach_reply(const QByteArray &reply);
 void parse_detach_reply(const QByteArray &reply);
 TraceScopes parse_trace_reply(const QByteArray &reply);
 DaemonStatus parse_status_reply(const QByteArray &reply);
+void parse_buzz_reply(const QByteArray &reply);
 
 } // namespace vds::gui

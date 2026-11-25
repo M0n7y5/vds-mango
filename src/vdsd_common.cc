@@ -339,7 +339,7 @@ std::string format_control_attach_reply(bool ok, std::string_view error,
   return reply;
 }
 
-std::string format_control_detach_reply(bool ok, std::string_view error,
+std::string format_control_address_reply(bool ok, std::string_view error,
                                         std::string_view address) {
   std::string reply = "{";
   reply += jsonl_bool_field("OK", ok);
@@ -481,14 +481,14 @@ std::string handle_detach_control_request(std::span<const JsonlField> fields,
     reject_unknown_jsonl_fields(fields, expected, context);
 
     if (address.empty()) {
-      return format_control_detach_reply(false, "address is not registered",
+      return format_control_address_reply(false, "address is not registered",
                                          address);
     }
     update_config_db(db_path, [&](ConfigDb &db) {
       removed = remove_controller_config(db, address);
     });
   } catch (const std::exception &error) {
-    return format_control_detach_reply(false, error.what(), address);
+    return format_control_address_reply(false, error.what(), address);
   }
   reload_requested = removed;
   logger.log(vds::LogScope::Control, LogLevel::Info,
@@ -496,9 +496,9 @@ std::string handle_detach_control_request(std::span<const JsonlField> fields,
 
   if (!removed) {
     address = {};
-    return format_control_detach_reply(false, "address is not registered", "");
+    return format_control_address_reply(false, "address is not registered", "");
   }
-  return format_control_detach_reply(true, "", address);
+  return format_control_address_reply(true, "", address);
 }
 
 std::string handle_list_control_request(
@@ -583,13 +583,42 @@ handle_status_control_request(std::span<const JsonlField> fields,
   return reply;
 }
 
+std::string handle_buzz_control_request(
+    std::span<const JsonlField> fields,
+    std::span<const VdsdControlControllerStatus> controllers,
+    std::string &buzz_address) {
+  constexpr std::string_view context = "control request";
+  std::string address;
+  try {
+    static constexpr std::string_view expected[] = {"command", "address"};
+    reject_unknown_jsonl_fields(fields, expected, context);
+    address = normalize_bluetooth_address(
+        require_jsonl_string(fields, "address", context));
+    const auto controller = std::find_if(
+        controllers.begin(), controllers.end(),
+        [&](const auto &candidate) { return candidate.address == address; });
+    if (controller == controllers.end() || !controller->connected) {
+      throw std::runtime_error(
+          "the controller is not connected; press the PS button first");
+    }
+    if (controller->audio_busy) {
+      throw std::runtime_error("the controller's audio is in use; close the "
+                               "game or app playing through it first");
+    }
+  } catch (const std::exception &error) {
+    return format_control_address_reply(false, error.what(), address);
+  }
+  buzz_address = address;
+  return format_control_address_reply(true, "", address);
+}
+
 std::string handle_vdsd_control_command(
     std::string_view request, const std::string &db_path,
     std::span<const VdsdControlControllerStatus> controllers,
     std::span<const VdsdControlPortStatus> ports,
     const std::function<std::vector<ControllerTarget>()> &list_targets,
     const VdsdControlDaemonStatus &daemon, std::uint32_t &trace_flags,
-    bool &reload_requested, Logger &logger) {
+    bool &reload_requested, std::string &buzz_address, Logger &logger) {
   try {
     constexpr std::string_view context = "control request";
     const std::vector<JsonlField> fields = parse_jsonl_object(request, context);
@@ -614,6 +643,9 @@ std::string handle_vdsd_control_command(
     }
     if (command == "status") {
       return handle_status_control_request(fields, daemon);
+    }
+    if (command == "buzz") {
+      return handle_buzz_control_request(fields, controllers, buzz_address);
     }
 
     logger.log(vds::LogScope::Control, LogLevel::Warn,

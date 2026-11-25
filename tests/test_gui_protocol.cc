@@ -37,6 +37,9 @@ public:
   /// The verdict of vdsd's driver test at the first connect.
   void set_kernel_fix(bool present) { kernel_fix_ = present; }
 
+  /// The controller the last buzz command asked vdsd to vibrate.
+  const std::string &buzzed() const { return buzzed_; }
+
   QByteArray handle(const QByteArray &request) {
     static const std::vector<vds::VdsdControlPortStatus> kPorts = {
         {.port = 0,
@@ -64,7 +67,7 @@ public:
         },
         vds::VdsdControlDaemonStatus{.version = "1.2.3",
                                      .kernel_fix = kernel_fix_},
-        trace_flags_, reload_requested, logger_);
+        trace_flags_, reload_requested, buzzed_, logger_);
     return QByteArray::fromStdString(reply);
   }
 
@@ -75,6 +78,7 @@ private:
   std::uint32_t trace_flags_ = 0;
   std::vector<vds::VdsdControlControllerStatus> statuses_;
   std::optional<bool> kernel_fix_;
+  std::string buzzed_;
 };
 
 std::string error_of(Daemon &daemon, const QByteArray &request,
@@ -315,6 +319,41 @@ void test_status_reports_a_kernel_without_the_fix() {
   VDS_CHECK_EQ(*kernel_fix, false);
 }
 
+void test_buzz_request_names_the_connected_controller_to_vdsd() {
+  Daemon daemon;
+  daemon.connect({
+      .address = "aa:bb:cc:dd:ee:01",
+      .connected = true,
+      .path = "vds0",
+      .error = "",
+  });
+  vds::gui::parse_buzz_reply(
+      daemon.handle(vds::gui::buzz_request("AA:BB:CC:DD:EE:01")));
+  VDS_CHECK_EQ(daemon.buzzed(), std::string("aa:bb:cc:dd:ee:01"));
+}
+
+void test_buzz_for_a_controller_that_is_off_surfaces_the_daemon_error_text() {
+  Daemon daemon;
+  VDS_CHECK_EQ(
+      error_of(daemon, vds::gui::buzz_request("aa:bb:cc:dd:ee:01"),
+               vds::gui::parse_buzz_reply),
+      std::string("the controller is not connected; press the PS button "
+                  "first"));
+}
+
+void test_buzz_is_refused_while_a_game_plays_through_the_controller() {
+  Daemon daemon;
+  daemon.connect({
+      .address = "aa:bb:cc:dd:ee:01",
+      .connected = true,
+      .path = "vds0",
+      .error = "",
+      .audio_busy = true,
+  });
+  (void)daemon.handle(vds::gui::buzz_request("aa:bb:cc:dd:ee:01"));
+  VDS_CHECK(daemon.buzzed().empty());
+}
+
 void run_tests() {
   test_daemon_accepts_the_attach_request_and_gui_reads_the_reply();
   test_listed_controller_keeps_the_attached_profile_and_ports();
@@ -332,6 +371,9 @@ void run_tests() {
   test_status_reports_the_daemon_version();
   test_status_before_any_connect_leaves_the_kernel_fix_unknown();
   test_status_reports_a_kernel_without_the_fix();
+  test_buzz_request_names_the_connected_controller_to_vdsd();
+  test_buzz_for_a_controller_that_is_off_surfaces_the_daemon_error_text();
+  test_buzz_is_refused_while_a_game_plays_through_the_controller();
 }
 
 } // namespace vds::test

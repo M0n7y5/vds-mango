@@ -187,7 +187,8 @@ private:
   bool charging_ = false;
 };
 
-ControllerCard::ControllerCard(std::function<void()> on_edit,
+ControllerCard::ControllerCard(std::function<void()> on_test,
+                               std::function<void()> on_edit,
                                std::function<void()> on_remove,
                                QWidget *parent)
     : QFrame(parent) {
@@ -242,14 +243,18 @@ ControllerCard::ControllerCard(std::function<void()> on_edit,
   detail_ = new QLabel(this);
   detail_->setWordWrap(true);
   make_secondary(detail_);
+  test_ = action_button("Test", "media-playback-start", this);
+  test_->setToolTip("Vibrates the controller briefly.");
   auto *edit = action_button("Edit", "document-edit", this);
   auto *remove = action_button("Remove", "list-remove", this);
+  connect(test_, &QToolButton::clicked, this, std::move(on_test));
   connect(edit, &QToolButton::clicked, this, std::move(on_edit));
   connect(remove, &QToolButton::clicked, this, std::move(on_remove));
   auto *actions = new QHBoxLayout;
   actions->addWidget(headset_);
   actions->addWidget(mic_);
   actions->addWidget(detail_, 1);
+  actions->addWidget(test_, 0, Qt::AlignBottom);
   actions->addWidget(edit, 0, Qt::AlignBottom);
   actions->addWidget(remove, 0, Qt::AlignBottom);
 
@@ -264,6 +269,7 @@ ControllerCard::ControllerCard(std::function<void()> on_edit,
 void ControllerCard::show_controller(const ControllerStatus &controller,
                                      const QString &name) {
   connected_ = controller.connected;
+  test_->setVisible(connected_);
   name_->setText(name);
   address_->setText(controller.address);
 

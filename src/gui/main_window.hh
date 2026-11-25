@@ -50,6 +50,7 @@ private:
 
   void open_setup();
   void open_diagnostics();
+  void test_controller(const QString &address);
   void edit_controller(const QString &address);
   void remove_controller(const QString &address);
   void apply_assignment(const ControllerAssignment &assignment);

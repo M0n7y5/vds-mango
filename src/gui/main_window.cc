@@ -261,6 +261,7 @@ void MainWindow::rebuild_cards() {
   for (const ControllerStatus &controller : controllers_) {
     const QString address = controller.address;
     auto *card = new ControllerCard(
+        [this, address] { test_controller(address); },
         [this, address] {
           QTimer::singleShot(0, this,
                              [this, address] { edit_controller(address); });
@@ -448,6 +449,20 @@ void MainWindow::remove_controller(const QString &address) {
       },
       [this](const QString &error) {
         show_action_error("Remove controller", error);
+      });
+}
+
+void MainWindow::test_controller(const QString &address) {
+  client_.send(
+      buzz_request(address),
+      [this, address](const QByteArray &reply) {
+        parse_buzz_reply(reply);
+        statusBar()->showMessage("Sent a test buzz to " + name_of(address) +
+                                     ".",
+                                 kStatusMessageMs);
+      },
+      [this](const QString &error) {
+        show_action_error("Test haptics", error);
       });
 }
 

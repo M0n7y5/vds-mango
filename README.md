@@ -121,9 +121,15 @@ controllers in `/var/lib/vds` and the log.
 ## Graphical app
 
 Besides the wizard, `vds-mango` shows a card for each registered controller
-with its connection state and battery level, changes which controller model
-games see and which virtual ports a controller may use, removes controllers,
-and toggles trace logging.
+with its connection state, battery level, and headset and microphone state.
+From a card you change which controller model games see and which virtual
+ports the controller may use, remove it, or press Test to make it vibrate
+briefly. Test needs the controller's audio to be idle, so close a game that
+plays through it first.
+
+The line along the bottom checks the service, the kernel fix and Bluetooth;
+a banner explains whichever one fails. Diagnostics opens the trace logging
+switches and a summary of your setup to copy into a bug report.
 
 Edit also sets, per controller, how much audio the controller queues before
 it plays haptics and speaker sound. Smaller values react sooner; too small
@@ -393,8 +399,9 @@ speaker-test -D hw:<card-number>,<device-number> -c 4 -r 48000 -F S16_LE -t sine
 Report bugs on the [CachyOS Discord](https://discord.gg/cachyos-862292009423470592).
 The GitHub issue tracker is not open yet.
 
-Include the distribution, kernel (`uname -r`), vDS Mango version
-(`vdsctl --version`), controller model, your Bluetooth adapter, the affected
+Paste the summary from Diagnostics > Copy system info in the graphical app
+(versions, kernel, the three checks and each controller's firmware; no
+Bluetooth addresses), and add your Bluetooth adapter, the affected
 application or game, and the steps to reproduce it.
 
 For runtime problems, enable tracing before reproducing the issue, then turn it

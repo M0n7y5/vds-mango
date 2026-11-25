@@ -14,6 +14,7 @@
 #include "control_protocol.hh"
 
 class QLabel;
+class QToolButton;
 
 namespace vds::gui {
 
@@ -28,8 +29,9 @@ class ControllerCard : public QFrame {
 public:
   /// on_edit and on_remove run inside a button click of this card, so they
   /// must not open a dialog or do anything else that could delete the card.
-  ControllerCard(std::function<void()> on_edit, std::function<void()> on_remove,
-                 QWidget *parent);
+  /// on_test vibrates the controller.
+  ControllerCard(std::function<void()> on_test, std::function<void()> on_edit,
+                 std::function<void()> on_remove, QWidget *parent);
 
   void show_controller(const ControllerStatus &controller, const QString &name);
 
@@ -55,6 +57,7 @@ private:
   QLabel *headset_ = nullptr;
   QLabel *mic_ = nullptr;
   QLabel *detail_ = nullptr;
+  QToolButton *test_ = nullptr;
 };
 
 /// The dashed card that starts adding a controller.

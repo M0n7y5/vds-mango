@@ -153,6 +153,10 @@ QByteArray status_request() {
   return request_line(QJsonObject{{"command", "status"}});
 }
 
+QByteArray buzz_request(const QString &address) {
+  return request_line(QJsonObject{{"command", "buzz"}, {"address", address}});
+}
+
 std::vector<ControllerStatus> parse_list_reply(const QByteArray &reply) {
   std::vector<ControllerStatus> controllers;
   for (const QJsonObject &object : reply_objects(reply)) {
@@ -200,6 +204,8 @@ AttachResult parse_attach_reply(const QByteArray &reply) {
 }
 
 void parse_detach_reply(const QByteArray &reply) { (void)command_reply(reply); }
+
+void parse_buzz_reply(const QByteArray &reply) { (void)command_reply(reply); }
 
 TraceScopes parse_trace_reply(const QByteArray &reply) {
   const QJsonArray scopes = require_array(command_reply(reply), "scope");
