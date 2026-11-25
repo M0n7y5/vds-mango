@@ -4,14 +4,12 @@
 
 #include <optional>
 #include <string>
-#include <vector>
 
 struct udev;
 struct udev_monitor;
 
 namespace vds {
 
-std::vector<std::string> discover_vds_devices();
 bool bluetooth_hid_device_present(const std::string &address);
 
 /// A DualSense that BlueZ's input plugin connected and hid-playstation drives.
@@ -26,23 +24,20 @@ struct BluezHidPad {
 /// Empty until the kernel driver has created the gamepad's input device.
 std::optional<BluezHidPad> find_bluez_hid_pad(const std::string &address);
 
-class VdsDeviceMonitor {
+/// Watches input devices appear and disappear.
+class InputDeviceMonitor {
 public:
-  VdsDeviceMonitor();
-  ~VdsDeviceMonitor();
+  InputDeviceMonitor();
+  ~InputDeviceMonitor();
 
-  VdsDeviceMonitor(const VdsDeviceMonitor &) = delete;
-  VdsDeviceMonitor &operator=(const VdsDeviceMonitor &) = delete;
-  VdsDeviceMonitor(VdsDeviceMonitor &&other) noexcept;
-  VdsDeviceMonitor &operator=(VdsDeviceMonitor &&other) noexcept;
-
-  struct Events {
-    bool vds_port = false;
-    bool input = false;
-  };
+  InputDeviceMonitor(const InputDeviceMonitor &) = delete;
+  InputDeviceMonitor &operator=(const InputDeviceMonitor &) = delete;
+  InputDeviceMonitor(InputDeviceMonitor &&other) noexcept;
+  InputDeviceMonitor &operator=(InputDeviceMonitor &&other) noexcept;
 
   int fd() const;
-  Events drain();
+  /// True when something changed since the last call.
+  bool drain();
 
 private:
   udev *udev_ = nullptr;

@@ -89,6 +89,10 @@ target_include_directories(vds_gui_protocol
                            PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src/gui)
 target_link_libraries(vds_gui_protocol PUBLIC vds_config Qt6::Core)
 
+add_library(vds_usbip OBJECT src/vds_usbip.cc)
+target_include_directories(vds_usbip PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
+                                            ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
 if(BUILD_TESTS)
   enable_testing()
   add_library(vds_test_support OBJECT tests/vds_check.cc)
@@ -146,6 +150,11 @@ if(BUILD_TESTS)
             Qt6::Core)
   add_test(NAME gui_protocol COMMAND test_gui_protocol
            WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+
+  add_executable(test_usbip tests/test_usbip.cc)
+  target_link_libraries(test_usbip PRIVATE vds_test_support vds_usbip)
+  add_test(NAME usbip COMMAND test_usbip
+           WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 endif()
 
 add_library(vds_bt OBJECT src/vds_bt.cc)
@@ -160,7 +169,7 @@ target_include_directories(vds_udev PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(vds_udev PUBLIC vds_config vds_common vds_io
                                       PkgConfig::UDEV)
 
-add_executable(vdsd src/vdsd.cc)
+add_executable(vdsd src/vdsd.cc src/vds_sleep.cc)
 add_dependencies(vdsd vds_build_info_header)
 target_include_directories(vdsd PRIVATE ${VDS_GENERATED_DIR})
 target_link_libraries(
@@ -174,6 +183,7 @@ target_link_libraries(
           vds_io
           vds_log
           vds_udev
+          vds_usbip
           vdsd_common
           PkgConfig::SYSTEMD)
 

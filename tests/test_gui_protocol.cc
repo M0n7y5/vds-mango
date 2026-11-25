@@ -31,12 +31,12 @@ public:
   QByteArray handle(const QByteArray &request) {
     static const std::vector<vds::VdsdControlPortStatus> kPorts = {
         {.port = 0,
-         .path = "/dev/vds0",
+         .path = "vds0",
          .occupied = false,
          .address = "",
          .device_address = ""},
         {.port = 2,
-         .path = "/dev/vds2",
+         .path = "vds2",
          .occupied = false,
          .address = "",
          .device_address = ""},

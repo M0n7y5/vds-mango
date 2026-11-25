@@ -65,69 +65,9 @@ std::string gamepad_event_node(const std::filesystem::path &hid_device) {
   return {};
 }
 
-bool is_vds_device_path(std::string_view path) {
-  constexpr std::string_view prefix = "/dev/vds";
-  return path.rfind(prefix, 0) == 0 &&
-         vds::is_decimal_number(path.substr(prefix.size()));
-}
-
-std::string require_vds_devnode(udev_device *device) {
-  const char *devnode = ::udev_device_get_devnode(device);
-  if (devnode == nullptr || !is_vds_device_path(devnode)) {
-    return {};
-  }
-  return devnode;
-}
-
 } // namespace
 
 namespace vds {
-
-std::vector<std::string> discover_vds_devices() {
-  udev *context = ::udev_new();
-  if (context == nullptr) {
-    throw std::runtime_error("failed to create udev context");
-  }
-
-  udev_enumerate *enumerate = ::udev_enumerate_new(context);
-  if (enumerate == nullptr) {
-    ::udev_unref(context);
-    throw std::runtime_error("failed to create udev enumerate context");
-  }
-
-  if (::udev_enumerate_add_match_subsystem(enumerate, "misc") < 0 ||
-      ::udev_enumerate_scan_devices(enumerate) < 0) {
-    ::udev_enumerate_unref(enumerate);
-    ::udev_unref(context);
-    throw std::runtime_error("failed to enumerate udev misc devices");
-  }
-
-  std::vector<std::string> devices;
-  udev_list_entry *entries = ::udev_enumerate_get_list_entry(enumerate);
-  udev_list_entry *entry = nullptr;
-  udev_list_entry_foreach(entry, entries) {
-    const char *syspath = ::udev_list_entry_get_name(entry);
-    if (syspath == nullptr) {
-      continue;
-    }
-
-    udev_device *device = ::udev_device_new_from_syspath(context, syspath);
-    if (device == nullptr) {
-      continue;
-    }
-    const std::string devnode = require_vds_devnode(device);
-    if (!devnode.empty()) {
-      devices.push_back(devnode);
-    }
-    ::udev_device_unref(device);
-  }
-
-  ::udev_enumerate_unref(enumerate);
-  ::udev_unref(context);
-
-  std::sort(devices.begin(), devices.end());
-  return devices;
-}
 
 bool bluetooth_hid_device_present(const std::string &address) {
   const std::string normalized_address = normalize_bluetooth_address(address);
@@ -229,7 +169,7 @@ std::optional<BluezHidPad> find_bluez_hid_pad(const std::string &address) {
   return std::nullopt;
 }
 
-VdsDeviceMonitor::VdsDeviceMonitor() {
+InputDeviceMonitor::InputDeviceMonitor() {
   udev_ = ::udev_new();
   if (udev_ == nullptr) {
     throw std::runtime_error("failed to create udev context");
@@ -241,9 +181,7 @@ VdsDeviceMonitor::VdsDeviceMonitor() {
     udev_ = nullptr;
     throw std::runtime_error("failed to create udev monitor");
   }
-  if (::udev_monitor_filter_add_match_subsystem_devtype(monitor_, "misc",
-                                                        nullptr) < 0 ||
-      ::udev_monitor_filter_add_match_subsystem_devtype(monitor_, "input",
+  if (::udev_monitor_filter_add_match_subsystem_devtype(monitor_, "input",
                                                         nullptr) < 0) {
     ::udev_monitor_unref(monitor_);
     ::udev_unref(udev_);
@@ -261,7 +199,7 @@ VdsDeviceMonitor::VdsDeviceMonitor() {
   set_nonblocking(fd(), "udev monitor");
 }
 
-VdsDeviceMonitor::~VdsDeviceMonitor() {
+InputDeviceMonitor::~InputDeviceMonitor() {
   if (monitor_ != nullptr) {
     ::udev_monitor_unref(monitor_);
   }
@@ -270,12 +208,12 @@ VdsDeviceMonitor::~VdsDeviceMonitor() {
   }
 }
 
-VdsDeviceMonitor::VdsDeviceMonitor(VdsDeviceMonitor &&other) noexcept
+InputDeviceMonitor::InputDeviceMonitor(InputDeviceMonitor &&other) noexcept
     : udev_(std::exchange(other.udev_, nullptr)),
       monitor_(std::exchange(other.monitor_, nullptr)) {}
 
-VdsDeviceMonitor &
-VdsDeviceMonitor::operator=(VdsDeviceMonitor &&other) noexcept {
+InputDeviceMonitor &
+InputDeviceMonitor::operator=(InputDeviceMonitor &&other) noexcept {
   if (this == &other) {
     return *this;
   }
@@ -290,21 +228,16 @@ VdsDeviceMonitor::operator=(VdsDeviceMonitor &&other) noexcept {
   return *this;
 }
 
-int VdsDeviceMonitor::fd() const { return ::udev_monitor_get_fd(monitor_); }
+int InputDeviceMonitor::fd() const { return ::udev_monitor_get_fd(monitor_); }
 
-VdsDeviceMonitor::Events VdsDeviceMonitor::drain() {
-  Events events;
+bool InputDeviceMonitor::drain() {
+  bool changed = false;
   while (true) {
     udev_device *device = ::udev_monitor_receive_device(monitor_);
     if (device == nullptr) {
-      return events;
+      return changed;
     }
-    const char *subsystem = ::udev_device_get_subsystem(device);
-    if (subsystem != nullptr && std::string_view(subsystem) == "input") {
-      events.input = true;
-    } else if (!require_vds_devnode(device).empty()) {
-      events.vds_port = true;
-    }
+    changed = true;
     ::udev_device_unref(device);
   }
 }

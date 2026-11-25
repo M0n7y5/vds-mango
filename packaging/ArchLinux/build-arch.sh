@@ -104,7 +104,6 @@ arch=$(uname -m)
 version_args=(--internal arch)
 package_args=(--package arch --name "$package_name" --pkgrel "$pkgrel" --arch "$arch")
 pkgver=$("${repo_root}/scripts/generate-version.sh" "${version_args[@]}")
-dkms_version=$pkgver
 build_date=$(date +%s)
 build_dir="${build_root}/cmake"
 package_root="${build_root}/${package_name}-${pkgver}-${pkgrel}-${arch}"
@@ -119,7 +118,7 @@ cmake -S "$repo_root" -B "$build_dir" \
 	-DCMAKE_INSTALL_PREFIX=/usr \
 	-DINSTALL_SERVICE=OFF
 cmake --build "$build_dir" --parallel "$jobs"
-"${script_dir}/stage.sh" "$repo_root" "$build_dir" "$package_root" "$dkms_version"
+"${script_dir}/stage.sh" "$repo_root" "$build_dir" "$package_root"
 
 installed_size=$(du -sb "$package_root" | awk '{print $1}')
 substitute_template "${script_dir}/PKGINFO.in" "${package_root}/.PKGINFO"

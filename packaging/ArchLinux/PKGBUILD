@@ -8,14 +8,10 @@ pkgdesc="Bluetooth DualSense as a virtual USB one: haptics, adaptive triggers, s
 arch=('x86_64')
 url="https://github.com/M0n7y5/vds-mango"
 license=('MIT')
-depends=('bluez' 'bluez-libs' 'dbus' 'dkms' 'gcc-libs' 'glibc' 'kmod' 'make'
-         'opus' 'polkit' 'qt6-base' 'systemd-libs')
+depends=('bluez' 'bluez-libs' 'dbus' 'gcc-libs' 'glibc' 'kmod' 'opus' 'polkit'
+         'qt6-base' 'systemd-libs')
 makedepends=('cmake' 'git' 'pkgconf')
-optdepends=('linux-headers: build the kernel module for the linux kernel'
-            'linux-lts-headers: build the kernel module for the linux-lts kernel'
-            'linux-cachyos-headers: build the kernel module for the linux-cachyos kernel'
-            'clang: build the kernel module for kernels built with clang'
-            'pipewire: controller haptics, speaker and microphone'
+optdepends=('pipewire: controller haptics, speaker and microphone'
             'wireplumber: names and priorities of the controller audio devices'
             'logrotate: rotate /var/log/vdsd.log')
 conflicts=('vds')
@@ -33,5 +29,5 @@ build() {
 
 package() {
 	"$pkgname/packaging/ArchLinux/stage.sh" \
-		"$srcdir/$pkgname" "$srcdir/build" "$pkgdir" "$pkgver"
+		"$srcdir/$pkgname" "$srcdir/build" "$pkgdir"
 }

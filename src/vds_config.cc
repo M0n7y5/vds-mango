@@ -257,21 +257,21 @@ std::string format_ports(std::span<const unsigned> ports) {
   return text;
 }
 
-std::string port_path_for_index(unsigned port) {
+std::string port_name_for_index(unsigned port) {
   if (port >= kMaxPortCount) {
     throw std::runtime_error("port must be in range 0.." +
                              std::to_string(kMaxPortCount - 1) + ": " +
                              std::to_string(port));
   }
-  return "/dev/vds" + std::to_string(port);
+  return "vds" + std::to_string(port);
 }
 
-std::optional<unsigned> port_index_from_path(std::string_view path) {
-  constexpr std::string_view prefix = "/dev/vds";
-  if (path.rfind(prefix, 0) != 0) {
+std::optional<unsigned> port_index_from_name(std::string_view name) {
+  constexpr std::string_view prefix = "vds";
+  if (name.rfind(prefix, 0) != 0) {
     return std::nullopt;
   }
-  const std::string_view port_text = path.substr(prefix.size());
+  const std::string_view port_text = name.substr(prefix.size());
 
   if (!vds::is_decimal_number(port_text)) {
     return std::nullopt;
@@ -293,9 +293,9 @@ bool controller_config_allows_port(const ControllerConfig &config,
              config.ports.end();
 }
 
-bool controller_config_allows_path(const ControllerConfig &config,
-                                   std::string_view path) {
-  const auto port = port_index_from_path(path);
+bool controller_config_allows_port_name(const ControllerConfig &config,
+                                        std::string_view name) {
+  const auto port = port_index_from_name(name);
   return port && controller_config_allows_port(config, *port);
 }
 
@@ -401,7 +401,7 @@ void validate_config_assignments(const ConfigDb &db,
 
   std::vector<unsigned> available_ports;
   for (const auto &device : devices) {
-    const auto port = port_index_from_path(device);
+    const auto port = port_index_from_name(device);
     if (port) {
       available_ports.push_back(*port);
     }

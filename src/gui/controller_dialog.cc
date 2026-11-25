@@ -73,7 +73,7 @@ ControllerDialog::ControllerDialog(const ControllerStatus &controller,
   for (std::size_t port = 0; port < port_boxes_.size(); ++port) {
     port_boxes_[port] = new QCheckBox(QString::number(port), this);
     port_boxes_[port]->setToolTip(QString::fromStdString(
-        port_path_for_index(static_cast<unsigned>(port))));
+        port_name_for_index(static_cast<unsigned>(port))));
     port_boxes_[port]->setChecked(
         std::find(controller.ports.begin(), controller.ports.end(), port) !=
         controller.ports.end());

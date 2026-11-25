@@ -8,9 +8,9 @@ Arch Linux.
 >
 > This is a beta. It has been tested on one machine: CachyOS with the
 > `linux-cachyos` kernel, KDE Plasma, PipeWire and one DualSense. A DualSense
-> Edge, several controllers at once and Secure Boot are untested. Sharing a
-> controller with the standard Bluetooth support needs a kernel fix that is
-> new; other kernels fall back to a Bluetooth takeover. See
+> Edge and several controllers at once are untested. Sharing a controller with
+> the standard Bluetooth support needs a kernel fix that is new; other kernels
+> fall back to a Bluetooth takeover. See
 > [Reporting Issues](#reporting-issues) if something does not work.
 
 It is a virtual USB-to-Bluetooth bridge for DualSense and DualSense Edge
@@ -21,9 +21,9 @@ headphone output.
 
 `vdsd` communicates directly with the physical controller over Bluetooth HID
 and translates between its Bluetooth protocol and virtual USB traffic. The
-virtual DualSense-class device is exposed through `vds_hcd.ko`. Games and
-applications see a USB DualSense-class controller, while `vdsd` owns the
-physical Bluetooth HID Control and Interrupt channels.
+virtual DualSense-class device is plugged into `vhci_hcd`, the USB/IP host
+controller that ships with the kernel, so nothing is built for your kernel.
+Games and applications see a USB DualSense-class controller.
 
 > [!NOTE]
 >
@@ -44,24 +44,24 @@ physical Bluetooth HID Control and Interrupt channels.
 
 ## How it works
 
-The project includes a custom virtual USB HCD primarily because Linux's
-`dummy_hcd` module does not support isochronous transfers, which are required
-for the USB audio path used by DualSense haptics. The custom HCD currently also
-hosts the `/dev/vdsX` bridge and virtual port lifecycle, but that architecture
-may be revisited if `dummy_hcd` gains suitable isochronous transfer support.
-
-The current architecture uses both the kernel module and userspace daemon for
-runtime communication. For example, haptic feedback currently follows this flow:
+A DualSense plays haptics through a USB sound card, so the virtual controller
+needs a virtual USB port that carries audio. The kernel's `vhci_hcd` (USB/IP)
+does, and `vdsd` plays the USB device behind it over a local socket. Nothing
+goes over the network. Haptic feedback follows this flow:
 
 ```text
 Application
   -> Userspace audio server (e.g. PipeWire)
   -(ALSA PCM)-> Linux ALSA stack [snd-usb-audio.ko]
-  -(USB isochronous OUT URBs)-> Linux USB stack [vds_hcd.ko]
-  -(/dev/vdsX)-> vdsd
-  -(AF_BLUETOOTH L2CAP socket)-> Linux Bluetooth stack
+  -(USB isochronous OUT URBs)-> Linux USB stack [vhci_hcd.ko]
+  -(USB/IP over a local socket)-> vdsd
+  -(hidraw or AF_BLUETOOTH L2CAP socket)-> Linux Bluetooth stack
   -(Bluetooth HID Control/Interrupt)-> DualSense (Edge) controller
 ```
+
+`vhci_hcd` refuses to let the system sleep while a device is plugged into it,
+so `vdsd` unplugs the virtual controllers when the system is about to sleep.
+Press PS after waking up to reconnect.
 
 The virtual USB HID endpoint descriptors match each controller's USB HID
 specification: DualSense HID IN/OUT use 4 ms intervals, while DualSense Edge HID
@@ -75,26 +75,16 @@ transports other than Bluetooth.
 
 ## Quick start
 
-Install kernel headers for the running kernel first, then the package from the
-AUR, which builds it from source:
+Install the package from the AUR, which builds it from source:
 
 ```sh
-sudo pacman -S linux-cachyos-headers # linux-headers on Arch
-paru -S vds-mango                    # or another AUR helper
+paru -S vds-mango # or another AUR helper
 ```
 
-Without matching headers the install stops and prints the header package to
-install. The package builds `vds_hcd` through DKMS, installs the udev and audio
-rules, and enables and starts `vdsd.service`. It conflicts with the upstream
-`vds` package because both ship the same binaries and module.
-
-With Secure Boot enabled the kernel only loads signed modules. DKMS signs
-`vds_hcd` with its own key, which has to be enrolled once, followed by a
-reboot:
-
-```sh
-sudo mokutil --import /var/lib/dkms/mok.pub
-```
+The package installs the udev and audio rules, and enables and starts
+`vdsd.service`, which loads `vhci_hcd`. There is no kernel module to build and
+nothing to sign for Secure Boot. It conflicts with the upstream `vds` package
+because both ship the same binaries.
 
 After installing, open **vDS Mango** from the application menu (or run
 `vds-mango`). The setup wizard does the rest:
@@ -169,8 +159,8 @@ The script prints the effective `bluetooth.service` ExecStart when it is done.
 vdsctl list
 ```
 
-`connected` reports whether the pad is live, `path` is the virtual device
-(`/dev/vds0`..`/dev/vds3`) once connected, and `error` carries the last connect
+`connected` reports whether the pad is live, `path` names the virtual port
+(`vds0`..`vds3`) once connected, and `error` carries the last connect
 failure. The daemon log is `/var/log/vdsd.log`.
 
 ## Controller configuration
@@ -195,7 +185,7 @@ Omit `--ports` or pass `--ports ""` to allow all configured ports. Omit
 
 `vdsctl attach` on an address that is already registered updates its profile
 and ports. `vdsctl list` shows each registered controller with its connection
-state, the virtual device path while connected, and the last connection error.
+state, the virtual port while connected, and the last connection error.
 
 > [!TIP]
 >
@@ -211,8 +201,8 @@ state, the virtual device path while connected, and the last connection error.
 `audio_buffer` appears only once a controller's haptics and speaker delay was
 changed from Standard in the graphical app.
 
-With `--ports 0,2`, `vdsctl list` reports `/dev/vds0` or `/dev/vds2` as the
-active device path.
+With `--ports 0,2`, `vdsctl list` reports `vds0` or `vds2` as the active
+virtual port.
 
 ## Build from source
 
@@ -221,8 +211,8 @@ active device path.
 #### Runtime Dependencies
 
 - `libopus` (Bluetooth audio encoding)
-- `libudev` (virtual device discovery)
-- `libsystemd` (who is logged in at the computer)
+- `libudev` (finding the controller's Bluetooth side)
+- `libsystemd` (who is logged in at the computer, sleep announcements)
 - `libdbus-1` (BlueZ device metadata)
 - `libbluetooth` (Bluetooth address and L2CAP helpers)
 - `qt6-base` (graphical app)
@@ -230,50 +220,21 @@ active device path.
 
 #### Build Dependencies
 
-- `gnu99` compiler toolchain compatible with the target kernel build
 - `git` (for versioning)
-- `make`
-- Target Linux kernel headers
-- `dkms` (for installing and rebuilding the kernel module automatically)
-- `c++20` compiler toolchain for userspace
+- `c++20` compiler toolchain
 - `cmake` (3.16 or newer)
 - `pkg-config`
 
 ```sh
-sudo pacman -S git base-devel dkms cmake pkgconf
+sudo pacman -S git base-devel cmake pkgconf
 sudo pacman -S opus systemd dbus bluez-libs qt6-base polkit
 ```
 
-Install the header package matching your running kernel separately. If your
-kernel was built with the LLVM toolchain, install the matching LLVM toolchain
-instead of relying only on the default GNU toolchain.
-
-### Kernel Module Install
-
-Build the kernel module locally:
+`vdsd` needs the kernel's USB/IP host controller, which Arch and CachyOS
+kernels ship as a module:
 
 ```sh
-make -C module
-```
-
-Install or remove it through DKMS:
-
-```sh
-sudo make -C module install
-sudo make -C module uninstall
-```
-
-Load the module:
-
-```sh
-sudo modprobe vds_hcd
-```
-
-Without a `max_port` parameter, the module creates 4 virtual controller ports.
-To override the number of virtual controller ports:
-
-```sh
-sudo modprobe vds_hcd max_port=2 # must be in the range `1..4`
+sudo modprobe vhci-hcd
 ```
 
 ### Userspace Install
@@ -383,23 +344,17 @@ If the sink shows only two channels, select the card's `pro-audio` profile with
 
 ## Input Setup
 
-This step may not be required on every system, but `vds_hcd` is a platform
-controller. Without an override, a DualSense touchpad connected through
-`vds_hcd` can be classified as an `internal` touchpad instead of an `external`
-touchpad like a USB-connected controller. Install the included udev rule so the
-virtual controller touchpad is classified like the real USB controller:
+`data/72-vds-dualsense-hide.rules` hides a registered controller's Bluetooth
+side from other programs when `vdsd` shares it with BlueZ (see
+[Bluetooth](#bluetooth)):
 
 ```sh
-sudo cp data/99-vds-dualsense-udev.rules /etc/udev/rules.d/
 sudo cp data/72-vds-dualsense-hide.rules /etc/udev/rules.d/
 sudo udevadm control --reload-rules
 sudo udevadm trigger --subsystem-match=input
 ```
 
-The second rule hides a registered controller's Bluetooth side from other
-programs when `vdsd` shares it with BlueZ (see [Bluetooth](#bluetooth)).
-
-The package installs both rules and reloads udev already, so this step is only
+The package installs the rule and reloads udev already, so this step is only
 for source checkouts.
 
 ## Testing

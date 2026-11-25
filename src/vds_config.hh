@@ -60,12 +60,13 @@ std::string controller_profile_name(ControllerProfile profile);
 std::uint8_t parse_audio_buffer_length(std::string_view text);
 std::vector<unsigned> parse_ports(std::string_view text);
 std::string format_ports(std::span<const unsigned> ports);
-std::string port_path_for_index(unsigned port);
-std::optional<unsigned> port_index_from_path(std::string_view path);
+/// Virtual ports have no device node; this name identifies one to users.
+std::string port_name_for_index(unsigned port);
+std::optional<unsigned> port_index_from_name(std::string_view name);
 bool controller_config_allows_port(const ControllerConfig &config,
                                    unsigned port);
-bool controller_config_allows_path(const ControllerConfig &config,
-                                   std::string_view path);
+bool controller_config_allows_port_name(const ControllerConfig &config,
+                                        std::string_view name);
 std::vector<unsigned>
 controller_config_port_targets(const ControllerConfig &config);
 bool controller_config_has_candidate_port(

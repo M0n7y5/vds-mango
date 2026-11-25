@@ -27,15 +27,15 @@ void test_empty_targets_reply_names_the_pairing_tool() {
 void test_list_table_pads_columns_to_the_widest_cell() {
   constexpr std::string_view kReply =
       "{\"address\":\"aa:bb:cc:dd:ee:01\",\"connected\":true,"
-      "\"path\":\"/dev/vds_hcd0\",\"error\":\"\",\"profile\":\"ds5\","
+      "\"path\":\"vds0\",\"error\":\"\",\"profile\":\"ds5\","
       "\"ports\":[0]}\n"
       "{\"address\":\"11:22:33:44:55:66\",\"connected\":false,"
       "\"path\":\"\",\"error\":\"connect timed out\",\"profile\":\"\","
       "\"ports\":[]}\n";
   constexpr std::string_view kTable =
-      "ADDRESS            CONNECTED  PATH           PROFILE  PORTS  ERROR\n"
-      "aa:bb:cc:dd:ee:01  yes        /dev/vds_hcd0  ds5      0\n"
-      "11:22:33:44:55:66  no                        auto     all    connect "
+      "ADDRESS            CONNECTED  PATH  PROFILE  PORTS  ERROR\n"
+      "aa:bb:cc:dd:ee:01  yes        vds0  ds5      0\n"
+      "11:22:33:44:55:66  no               auto     all    connect "
       "timed out\n";
   VDS_CHECK_EQ(vds::format_vdsctl_list_table(kReply), std::string(kTable));
 }

@@ -52,8 +52,7 @@ jobs:
             libsystemd-dev \
             libdbus-1-dev \
             libbluetooth-dev \
-            qt6-base-dev \
-            linux-headers-$(uname -r)
+            qt6-base-dev
 
       - name: Configure
         run: |
@@ -68,10 +67,6 @@ jobs:
 
       - name: Run unit tests
         run: ctest --test-dir build --output-on-failure
-
-      - name: Build kernel module
-        if: matrix.cxx == 'g++'
-        run: make -C module
 
   archlinux:
     name: Arch Linux package
@@ -96,7 +91,6 @@ jobs:
               pacman -S --noconfirm \
                 git \
                 base-devel \
-                dkms \
                 cmake \
                 pkgconf
               pacman -S --noconfirm \
