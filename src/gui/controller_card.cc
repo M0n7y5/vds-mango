@@ -20,19 +20,6 @@
 
 namespace vds::gui {
 
-namespace {
-
-constexpr int kCardMinimumWidth = 380;
-constexpr int kAddCardHeight = 72;
-constexpr qreal kCardRadius = 12;
-constexpr qreal kStatusRadius = 11;
-constexpr qreal kChipRadius = 6;
-constexpr QSize kPictureSize(112, 78);
-constexpr QSize kStateIconSize(20, 20);
-constexpr unsigned kLowBatteryPercent = 15;
-
-enum class Tone { Plain, Muted, Positive, Warning, Negative };
-
 QColor tone_color(Tone tone, const QPalette &palette) {
   switch (tone) {
   case Tone::Positive:
@@ -48,6 +35,17 @@ QColor tone_color(Tone tone, const QPalette &palette) {
   }
   return palette.color(QPalette::WindowText);
 }
+
+namespace {
+
+constexpr int kCardMinimumWidth = 380;
+constexpr int kAddCardHeight = 72;
+constexpr qreal kCardRadius = 12;
+constexpr qreal kStatusRadius = 11;
+constexpr qreal kChipRadius = 6;
+constexpr QSize kPictureSize(112, 78);
+constexpr QSize kStateIconSize(20, 20);
+constexpr unsigned kLowBatteryPercent = 15;
 
 // QPalette::Mid nearly vanishes against the card on dark colour schemes.
 QColor outline_color(const QPalette &palette) {

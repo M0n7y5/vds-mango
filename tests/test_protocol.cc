@@ -91,12 +91,32 @@ void test_battery_charging_fault_reports_no_level() {
   VDS_CHECK(!usb_input_battery(input_report_with_battery_byte(0xa4)));
 }
 
+void test_firmware_version_reads_the_bytes_the_kernel_driver_reads() {
+  // hid-playstation: fw_version = get_unaligned_le32(&buf[28]) of report 0x20.
+  std::array<std::uint8_t, 64> report{};
+  report[0] = 0x20;
+  report[28] = 0x2a;
+  report[29] = 0x00;
+  report[30] = 0x10;
+  report[31] = 0x01;
+  const auto version = usb_firmware_version(report);
+  VDS_CHECK(version.has_value());
+  VDS_CHECK_EQ(*version, 0x0110002au);
+}
+
+void test_firmware_version_of_a_truncated_report_is_unknown() {
+  const std::array<std::uint8_t, 30> report{0x20};
+  VDS_CHECK(!usb_firmware_version(report));
+}
+
 void run_tests() {
 #if defined(VDS_TEST_L12)
   test_bt_input_accepts_minimum_frame();
   test_battery_level_counts_ten_percent_steps();
   test_battery_on_the_cable_reports_charging();
   test_battery_charging_fault_reports_no_level();
+  test_firmware_version_reads_the_bytes_the_kernel_driver_reads();
+  test_firmware_version_of_a_truncated_report_is_unknown();
 #elif defined(VDS_TEST_L11C)
   test_feature_set_packet_keeps_payload_tail();
 #else
@@ -105,6 +125,8 @@ void run_tests() {
   test_battery_level_counts_ten_percent_steps();
   test_battery_on_the_cable_reports_charging();
   test_battery_charging_fault_reports_no_level();
+  test_firmware_version_reads_the_bytes_the_kernel_driver_reads();
+  test_firmware_version_of_a_truncated_report_is_unknown();
 #endif
 }
 

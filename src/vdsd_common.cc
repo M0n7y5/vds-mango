@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Jihong Min <hurryman2212@gmail.com>
 
 #include <algorithm>
+#include <cstdio>
 #include <ostream>
 #include <stdexcept>
 #include <string>
@@ -242,6 +243,12 @@ std::string format_control_list_reply(
     reply += jsonl_bool_field("headset", status && status->headset);
     reply += ',';
     reply += jsonl_bool_field("mic_muted", status && status->mic_muted);
+    char firmware[11] = "";
+    if (status && status->firmware) {
+      std::snprintf(firmware, sizeof(firmware), "0x%08x", *status->firmware);
+    }
+    reply += ',';
+    reply += jsonl_string_field("firmware", firmware);
     reply += "}\n";
   }
   return reply;
@@ -555,12 +562,34 @@ std::string handle_trace_control_request(std::span<const JsonlField> fields,
   return format_control_trace_reply(true, "", trace_flags);
 }
 
+std::string
+handle_status_control_request(std::span<const JsonlField> fields,
+                              const VdsdControlDaemonStatus &daemon) {
+  constexpr std::string_view context = "control request";
+  static constexpr std::string_view expected[] = {"command"};
+  reject_unknown_jsonl_fields(fields, expected, context);
+
+  std::string reply = "{";
+  reply += jsonl_bool_field("OK", true);
+  reply += ',';
+  reply += jsonl_string_field("error", "");
+  reply += ',';
+  reply += jsonl_string_field("version", daemon.version);
+  reply += ',';
+  reply += jsonl_string_field("kernel_fix", !daemon.kernel_fix ? "unknown"
+                                            : *daemon.kernel_fix ? "yes"
+                                                                 : "no");
+  reply += "}\n";
+  return reply;
+}
+
 std::string handle_vdsd_control_command(
     std::string_view request, const std::string &db_path,
     std::span<const VdsdControlControllerStatus> controllers,
     std::span<const VdsdControlPortStatus> ports,
     const std::function<std::vector<ControllerTarget>()> &list_targets,
-    std::uint32_t &trace_flags, bool &reload_requested, Logger &logger) {
+    const VdsdControlDaemonStatus &daemon, std::uint32_t &trace_flags,
+    bool &reload_requested, Logger &logger) {
   try {
     constexpr std::string_view context = "control request";
     const std::vector<JsonlField> fields = parse_jsonl_object(request, context);
@@ -582,6 +611,9 @@ std::string handle_vdsd_control_command(
     }
     if (command == "trace") {
       return handle_trace_control_request(fields, trace_flags, logger);
+    }
+    if (command == "status") {
+      return handle_status_control_request(fields, daemon);
     }
 
     logger.log(vds::LogScope::Control, LogLevel::Warn,

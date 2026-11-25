@@ -40,6 +40,16 @@ struct VdsdControlControllerStatus {
   bool charging = false;
   bool headset = false;
   bool mic_muted = false;
+  /// As hid-playstation prints it, for bug reports.
+  std::optional<std::uint32_t> firmware = std::nullopt;
+};
+
+/// What the daemon knows about itself, for the status command.
+struct VdsdControlDaemonStatus {
+  std::string_view version;
+  /// Whether this kernel's hid-playstation ignores Bluetooth audio reports.
+  /// Unset until the first controller has connected.
+  std::optional<bool> kernel_fix = std::nullopt;
 };
 
 struct VdsdControlPortStatus {
@@ -83,6 +93,7 @@ std::string handle_vdsd_control_command(
     std::span<const VdsdControlControllerStatus> controllers,
     std::span<const VdsdControlPortStatus> ports,
     const std::function<std::vector<ControllerTarget>()> &list_targets,
-    std::uint32_t &trace_flags, bool &reload_requested, Logger &logger);
+    const VdsdControlDaemonStatus &daemon, std::uint32_t &trace_flags,
+    bool &reload_requested, Logger &logger);
 
 } // namespace vds

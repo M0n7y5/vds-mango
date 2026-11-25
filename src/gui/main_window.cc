@@ -5,10 +5,8 @@
 #include <utility>
 
 #include <QApplication>
-#include <QCheckBox>
 #include <QFont>
 #include <QGridLayout>
-#include <QGroupBox>
 #include <QHBoxLayout>
 #include <QIcon>
 #include <QKeySequence>
@@ -20,12 +18,14 @@
 #include <QScrollArea>
 #include <QStackedWidget>
 #include <QStatusBar>
+#include <QStringList>
 #include <QStyle>
-#include <QTabWidget>
+#include <QSysInfo>
 #include <QVBoxLayout>
 
 #include "controller_card.hh"
 #include "controller_dialog.hh"
+#include "diagnostics_dialog.hh"
 #include "main_window.hh"
 #include "setup_wizard.hh"
 
@@ -38,6 +38,13 @@ constexpr int kStatusMessageMs = 8000;
 constexpr int kCardColumns = 2;
 constexpr int kLogoSize = 96;
 
+void show_check(QLabel *check, Tone tone, const QString &text,
+                const QString &problem = {}) {
+  check->setText(QString("<span style=\"color:%1\">●</span> %2")
+                     .arg(tone_color(tone, check->palette()).name(), text));
+  check->setToolTip(problem);
+}
+
 } // namespace
 
 MainWindow::MainWindow(const QString &socket_path)
@@ -45,23 +52,23 @@ MainWindow::MainWindow(const QString &socket_path)
   setWindowTitle("vDS Mango");
   resize(900, 520);
 
-  tabs_ = new QTabWidget(this);
-  tabs_->addTab(build_controllers_page(), "Controllers");
-  tabs_->addTab(build_diagnostics_page(), "Diagnostics");
-
   auto *central = new QWidget(this);
   auto *layout = new QVBoxLayout(central);
   layout->addWidget(build_banner());
-  layout->addWidget(tabs_, 1);
+  layout->addWidget(build_controllers_page(), 1);
   setCentralWidget(central);
 
   build_menus();
-  statusBar();
+  build_health_strip();
+  update_health();
 
-  connect(&poll_timer_, &QTimer::timeout, this,
-          [this] { refresh_controllers(); });
+  connect(&poll_timer_, &QTimer::timeout, this, [this] {
+    refresh_controllers();
+    refresh_bluetooth();
+  });
   poll_timer_.start(kPollIntervalMs);
   refresh_controllers();
+  refresh_bluetooth();
 }
 
 QWidget *MainWindow::build_banner() {
@@ -137,40 +144,18 @@ QWidget *MainWindow::build_controllers_page() {
   return controller_pages_;
 }
 
-QWidget *MainWindow::build_diagnostics_page() {
-  auto *intro = new QLabel(
-      "Turn tracing on, reproduce the problem, then turn it off again. "
-      "Trace output goes to /var/log/vdsd.log and stops when vdsd restarts.",
-      this);
-  intro->setWordWrap(true);
-
-  trace_input_control_ =
-      new QCheckBox("Controller input: buttons, sticks, touchpad", this);
-  trace_input_audio_ = new QCheckBox("Microphone audio", this);
-  trace_output_ =
-      new QCheckBox("Output: haptics, speaker, triggers, lights", this);
-  const std::pair<QCheckBox *, const char *> scopes[] = {
-      {trace_input_control_, "input-control"},
-      {trace_input_audio_, "input-audio"},
-      {trace_output_, "output"},
-  };
-
-  auto *group = new QGroupBox("Trace logging", this);
-  auto *group_layout = new QVBoxLayout(group);
-  group_layout->addWidget(intro);
-  for (const auto &[box, scope] : scopes) {
-    group_layout->addWidget(box);
-    connect(box, &QCheckBox::clicked, this,
-            [this, name = QString(scope)](bool checked) {
-              set_trace(name, checked);
-            });
+void MainWindow::build_health_strip() {
+  service_check_ = new QLabel(this);
+  kernel_check_ = new QLabel(this);
+  bluetooth_check_ = new QLabel(this);
+  for (QLabel *check : {service_check_, kernel_check_, bluetooth_check_}) {
+    statusBar()->addWidget(check);
   }
-
-  auto *page = new QWidget(this);
-  auto *layout = new QVBoxLayout(page);
-  layout->addWidget(group);
-  layout->addStretch(1);
-  return page;
+  auto *diagnostics = new QPushButton("Diagnostics", this);
+  diagnostics->setFlat(true);
+  connect(diagnostics, &QPushButton::clicked, this,
+          [this] { open_diagnostics(); });
+  statusBar()->addPermanentWidget(diagnostics);
 }
 
 void MainWindow::build_menus() {
@@ -179,8 +164,8 @@ void MainWindow::build_menus() {
   setup_menu->addAction(QIcon::fromTheme("view-refresh"), "Refresh",
                         QKeySequence::Refresh, this, [this] {
                           refresh_controllers();
+                          refresh_bluetooth();
                           refresh_names();
-                          refresh_trace();
                         });
   auto *help_menu = menuBar()->addMenu("Help");
   help_menu->addAction("About vDS Mango", this, [this] { show_about(); });
@@ -197,11 +182,38 @@ void MainWindow::refresh_controllers() {
         list_pending_ = false;
         show_controllers(parse_list_reply(reply));
         show_daemon_error({});
+        refresh_status();
       },
       [this](const QString &error) {
         list_pending_ = false;
+        daemon_status_ = {};
         show_daemon_error(error);
       });
+}
+
+void MainWindow::refresh_status() {
+  client_.send(
+      status_request(),
+      [this](const QByteArray &reply) {
+        daemon_status_ = parse_status_reply(reply);
+        update_health();
+      },
+      [](const QString &) {});
+}
+
+void MainWindow::refresh_bluetooth() {
+  if (bluetooth_pending_) {
+    return;
+  }
+  bluetooth_pending_ = true;
+  const auto show = [this](const QString &problem) {
+    bluetooth_pending_ = false;
+    bluetooth_known_ = true;
+    bluetooth_problem_ = problem;
+    update_health();
+  };
+  bluez_.list_devices(
+      [show](const std::vector<BluetoothDevice> &) { show({}); }, show);
 }
 
 void MainWindow::refresh_names() {
@@ -214,13 +226,6 @@ void MainWindow::refresh_names() {
         }
         update_cards();
       },
-      [](const QString &) {});
-}
-
-void MainWindow::refresh_trace() {
-  client_.send(
-      trace_status_request(),
-      [this](const QByteArray &reply) { show_trace(parse_trace_reply(reply)); },
       [](const QString &) {});
 }
 
@@ -238,13 +243,6 @@ void MainWindow::show_controllers(std::vector<ControllerStatus> controllers) {
   }
   update_cards();
   controller_pages_->setCurrentIndex(controllers_.empty() ? 0 : 1);
-
-  const bool fix_missing = std::any_of(controllers_.begin(), controllers_.end(),
-                                       kernel_fix_missing);
-  kernel_problem_ =
-      fix_missing ? "This kernel cannot share controllers with Bluetooth. " +
-                        kKernelRequirement
-                  : QString();
 }
 
 void MainWindow::rebuild_cards() {
@@ -285,23 +283,16 @@ void MainWindow::update_cards() {
   }
 }
 
-void MainWindow::show_trace(const TraceScopes &scopes) {
-  trace_input_control_->setChecked(scopes.input_control);
-  trace_input_audio_->setChecked(scopes.input_audio);
-  trace_output_->setChecked(scopes.output);
-}
-
 void MainWindow::show_daemon_error(const QString &error) {
   const bool became_reachable =
       error.isEmpty() && (!daemon_known_ || !daemon_error_.isEmpty());
   daemon_known_ = true;
   daemon_error_ = error;
-  tabs_->setEnabled(error.isEmpty());
+  controller_pages_->setEnabled(error.isEmpty());
   if (became_reachable) {
     refresh_names();
-    refresh_trace();
   }
-  update_banner();
+  update_health();
   offer_setup_once();
 }
 
@@ -309,12 +300,45 @@ void MainWindow::show_action_error(const QString &title, const QString &error) {
   QMessageBox::warning(this, title, error);
 }
 
-void MainWindow::update_banner() {
-  const QString &text =
-      daemon_error_.isEmpty() ? kernel_problem_ : daemon_error_;
+void MainWindow::update_health() {
+  const bool service_ok = daemon_error_.isEmpty();
+  if (!daemon_known_) {
+    show_check(service_check_, Tone::Muted, "Checking the service");
+  } else if (service_ok) {
+    show_check(service_check_, Tone::Positive, "Service running");
+  } else {
+    show_check(service_check_, Tone::Negative, "Service not running",
+               daemon_error_);
+  }
+
+  QString kernel_problem;
+  if (!service_ok || !daemon_status_.kernel_fix) {
+    show_check(kernel_check_, Tone::Muted,
+               "Kernel is checked at first connect");
+  } else if (*daemon_status_.kernel_fix) {
+    show_check(kernel_check_, Tone::Positive, "Kernel has the DualSense fix");
+  } else {
+    kernel_problem = "This kernel cannot share controllers with Bluetooth. " +
+                     kKernelRequirement;
+    show_check(kernel_check_, Tone::Negative, "Kernel lacks the DualSense fix",
+               kernel_problem);
+  }
+
+  if (!bluetooth_known_) {
+    show_check(bluetooth_check_, Tone::Muted, "Checking Bluetooth");
+  } else if (bluetooth_problem_.isEmpty()) {
+    show_check(bluetooth_check_, Tone::Positive, "Bluetooth on");
+  } else {
+    show_check(bluetooth_check_, Tone::Negative, "Bluetooth unavailable",
+               bluetooth_problem_);
+  }
+
+  const QString &text = !service_ok                  ? daemon_error_
+                        : !kernel_problem.isEmpty() ? kernel_problem
+                                                    : bluetooth_problem_;
   banner_text_->setText(text);
-  // Setup can start the service; it cannot change the kernel.
-  banner_setup_->setVisible(!daemon_error_.isEmpty());
+  // Setup can start the service; it cannot change the kernel or Bluetooth.
+  banner_setup_->setVisible(!service_ok);
   banner_->setVisible(!text.isEmpty());
 }
 
@@ -333,11 +357,57 @@ QString MainWindow::name_of(const QString &address) const {
   return names_.value(address, "DualSense controller");
 }
 
+QString MainWindow::system_info() const {
+  QStringList lines;
+  lines << "vDS Mango " + QApplication::applicationVersion() + ", service " +
+               (daemon_status_.version.isEmpty() ? "unknown"
+                                                 : daemon_status_.version);
+  lines << "System: " + QSysInfo::prettyProductName() + ", kernel " +
+               QSysInfo::kernelVersion() + ", desktop " +
+               qEnvironmentVariable("XDG_CURRENT_DESKTOP", "unknown");
+  lines << "Service: " +
+               (daemon_error_.isEmpty() ? "running" : daemon_error_);
+  lines << QString("DualSense audio fix in the kernel: ") +
+               (!daemon_status_.kernel_fix    ? "not checked yet"
+                : *daemon_status_.kernel_fix ? "yes"
+                                             : "no");
+  lines << "Bluetooth: " +
+               (!bluetooth_known_             ? "not checked yet"
+                : bluetooth_problem_.isEmpty() ? "on"
+                                               : bluetooth_problem_);
+  if (controllers_.empty()) {
+    lines << "Controllers: none registered";
+  }
+  for (const ControllerStatus &controller : controllers_) {
+    QStringList facts;
+    facts << name_of(controller.address);
+    facts << (controller.connected       ? "connected on " + controller.path
+              : controller.error.isEmpty() ? "not connected"
+                                           : "error: " + controller.error);
+    if (!controller.firmware.isEmpty()) {
+      facts << "firmware " + controller.firmware;
+    }
+    if (controller.battery) {
+      facts << "battery " + QString::number(*controller.battery) + "%";
+    }
+    facts << "appears as " + profile_label(controller.profile);
+    facts << "port " + ports_label(controller.ports);
+    facts << "delay " + QString::number(controller.audio_buffer);
+    lines << "Controller: " + facts.join(", ");
+  }
+  return lines.join('\n');
+}
+
 void MainWindow::open_setup() {
   SetupWizard wizard(socket_path_, !daemon_error_.isEmpty(), this);
   wizard.exec();
   refresh_controllers();
   refresh_names();
+}
+
+void MainWindow::open_diagnostics() {
+  DiagnosticsDialog dialog(socket_path_, system_info(), this);
+  dialog.exec();
 }
 
 void MainWindow::edit_controller(const QString &address) {
@@ -391,16 +461,6 @@ void MainWindow::apply_assignment(const ControllerAssignment &assignment) {
       },
       [this](const QString &error) {
         show_action_error("Save controller", error);
-      });
-}
-
-void MainWindow::set_trace(const QString &scope, bool enabled) {
-  client_.send(
-      trace_request(scope, enabled),
-      [this](const QByteArray &reply) { show_trace(parse_trace_reply(reply)); },
-      [this](const QString &error) {
-        show_action_error("Trace logging", error);
-        refresh_trace();
       });
 }
 

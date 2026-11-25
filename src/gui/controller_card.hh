@@ -6,7 +6,9 @@
 #include <span>
 
 #include <QAbstractButton>
+#include <QColor>
 #include <QFrame>
+#include <QPalette>
 #include <QString>
 
 #include "control_protocol.hh"
@@ -17,6 +19,9 @@ namespace vds::gui {
 
 QString profile_label(ControllerProfile profile);
 QString ports_label(std::span<const unsigned> ports);
+
+enum class Tone { Plain, Muted, Positive, Warning, Negative };
+QColor tone_color(Tone tone, const QPalette &palette);
 
 /// One registered controller: its picture, state, battery and settings.
 class ControllerCard : public QFrame {

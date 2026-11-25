@@ -2199,6 +2199,7 @@ bool control_peer_allowed(int client_fd) {
 void handle_control_client(int control_fd, std::span<VirtualPort> ports,
                            std::span<ControllerRuntime> controllers,
                            const std::string &db_path,
+                           std::optional<bool> kernel_fix,
                            std::uint32_t &trace_flags, bool &reload_requested,
                            vds::Logger &logger, unsigned &accept_failures) {
   vds::UniqueFd client_fd(
@@ -2329,6 +2330,11 @@ void handle_control_client(int control_fd, std::span<VirtualPort> ports,
         .charging = port && port->battery && port->battery->charging,
         .headset = port && port->headset_plugged,
         .mic_muted = port && port->mic_muted,
+        .firmware =
+            port && port->feature_cached[vds::kFirmwareInfoReportId]
+                ? vds::usb_firmware_version(
+                      port->feature_cache[vds::kFirmwareInfoReportId])
+                : std::nullopt,
     });
   }
 
@@ -2368,8 +2374,10 @@ void handle_control_client(int control_fd, std::span<VirtualPort> ports,
 
   reply = vds::handle_vdsd_control_command(
       command, db_path, controller_statuses, port_statuses,
-      [] { return vds::list_bluez_controller_targets(); }, trace_flags,
-      reload_requested, logger);
+      [] { return vds::list_bluez_controller_targets(); },
+      vds::VdsdControlDaemonStatus{.version = vds::kVersion,
+                                   .kernel_fix = kernel_fix},
+      trace_flags, reload_requested, logger);
 
   send_reply(reply);
 }
@@ -2614,9 +2622,12 @@ int run_daemon(const Options &options, vds::Logger &logger) {
 
       if (source.type == EventType::Control) {
         if ((revents & EPOLLIN) != 0) {
-          handle_control_client(control_fd.get(), ports, controllers,
-                                options.db_path, trace_flags, reload_requested,
-                                logger, control_accept_failures);
+          handle_control_client(
+              control_fd.get(), ports, controllers, options.db_path,
+              sharing == BluetoothSharing::Unknown
+                  ? std::nullopt
+                  : std::optional(sharing == BluetoothSharing::Supported),
+              trace_flags, reload_requested, logger, control_accept_failures);
         }
         if ((revents & (EPOLLERR | EPOLLHUP)) != 0) {
           throw std::runtime_error("control socket epoll error");

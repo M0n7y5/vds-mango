@@ -70,6 +70,11 @@ std::optional<UsbInputReport>
 bt_input_to_usb_input(std::span<const std::uint8_t> packet);
 /// Empty while the controller reports a charging fault.
 std::optional<BatteryState> usb_input_battery(const UsbInputReport &report);
+/// The feature report hid-playstation reads the firmware version from.
+inline constexpr std::uint8_t kFirmwareInfoReportId = 0x20;
+/// Empty when the report is not a complete firmware info report.
+std::optional<std::uint32_t>
+usb_firmware_version(std::span<const std::uint8_t> feature_report);
 std::optional<std::vector<std::uint8_t>>
 bt_feature_to_usb_feature_reply(std::span<const std::uint8_t> packet);
 

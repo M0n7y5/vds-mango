@@ -206,6 +206,7 @@ add_executable(
   src/gui/control_client.cc
   src/gui/controller_card.cc
   src/gui/controller_dialog.cc
+  src/gui/diagnostics_dialog.cc
   src/gui/main_window.cc
   src/gui/setup_helper.cc
   src/gui/setup_wizard.cc)

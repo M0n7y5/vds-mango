@@ -25,6 +25,8 @@ struct ControllerStatus {
   bool charging = false;
   bool headset = false;
   bool mic_muted = false;
+  /// As the kernel prints it, empty while the controller is off.
+  QString firmware;
 };
 
 struct PairedController {
@@ -54,6 +56,13 @@ struct TraceScopes {
   bool output = false;
 };
 
+struct DaemonStatus {
+  QString version;
+  /// Whether the kernel has the DualSense audio fix. Unset until the first
+  /// controller has connected, because vdsd tests the driver then.
+  std::optional<bool> kernel_fix = std::nullopt;
+};
+
 /// The controller cannot connect because this kernel's hid-playstation lacks
 /// the Bluetooth audio fix.
 bool kernel_fix_missing(const ControllerStatus &controller);
@@ -69,6 +78,7 @@ QByteArray attach_request(const ControllerAssignment &assignment);
 QByteArray detach_request(const QString &address);
 QByteArray trace_status_request();
 QByteArray trace_request(const QString &scope, bool enabled);
+QByteArray status_request();
 
 /// The parsers throw std::runtime_error carrying the daemon's own error text
 /// when the reply is {"OK":false,...}, or a description of the malformed reply.
@@ -77,5 +87,6 @@ std::vector<PairedController> parse_list_targets_reply(const QByteArray &reply);
 AttachResult parse_attach_reply(const QByteArray &reply);
 void parse_detach_reply(const QByteArray &reply);
 TraceScopes parse_trace_reply(const QByteArray &reply);
+DaemonStatus parse_status_reply(const QByteArray &reply);
 
 } // namespace vds::gui

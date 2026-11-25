@@ -34,6 +34,9 @@ public:
     statuses_.push_back(std::move(status));
   }
 
+  /// The verdict of vdsd's driver test at the first connect.
+  void set_kernel_fix(bool present) { kernel_fix_ = present; }
+
   QByteArray handle(const QByteArray &request) {
     static const std::vector<vds::VdsdControlPortStatus> kPorts = {
         {.port = 0,
@@ -59,6 +62,8 @@ public:
               .trusted = true,
           }};
         },
+        vds::VdsdControlDaemonStatus{.version = "1.2.3",
+                                     .kernel_fix = kernel_fix_},
         trace_flags_, reload_requested, logger_);
     return QByteArray::fromStdString(reply);
   }
@@ -69,6 +74,7 @@ private:
   vds::Logger logger_;
   std::uint32_t trace_flags_ = 0;
   std::vector<vds::VdsdControlControllerStatus> statuses_;
+  std::optional<bool> kernel_fix_;
 };
 
 std::string error_of(Daemon &daemon, const QByteArray &request,
@@ -263,6 +269,52 @@ void test_controller_that_is_off_lists_no_battery_level() {
                  .battery.has_value());
 }
 
+void test_firmware_of_a_connected_controller_reaches_the_gui() {
+  Daemon daemon;
+  (void)daemon.handle(vds::gui::attach_request({
+      .address = "aa:bb:cc:dd:ee:01",
+      .profile = vds::ControllerProfile::Unspecified,
+      .ports = {},
+  }));
+  daemon.connect({
+      .address = "aa:bb:cc:dd:ee:01",
+      .connected = true,
+      .path = "vds0",
+      .error = "",
+      .firmware = 0x0110002a,
+  });
+  VDS_CHECK_EQ(
+      vds::gui::parse_list_reply(daemon.handle(vds::gui::list_request()))
+          .at(0)
+          .firmware.toStdString(),
+      std::string("0x0110002a"));
+}
+
+void test_status_reports_the_daemon_version() {
+  Daemon daemon;
+  VDS_CHECK_EQ(
+      vds::gui::parse_status_reply(daemon.handle(vds::gui::status_request()))
+          .version.toStdString(),
+      std::string("1.2.3"));
+}
+
+void test_status_before_any_connect_leaves_the_kernel_fix_unknown() {
+  Daemon daemon;
+  VDS_CHECK(
+      !vds::gui::parse_status_reply(daemon.handle(vds::gui::status_request()))
+           .kernel_fix.has_value());
+}
+
+void test_status_reports_a_kernel_without_the_fix() {
+  Daemon daemon;
+  daemon.set_kernel_fix(false);
+  const auto kernel_fix =
+      vds::gui::parse_status_reply(daemon.handle(vds::gui::status_request()))
+          .kernel_fix;
+  VDS_CHECK(kernel_fix.has_value());
+  VDS_CHECK_EQ(*kernel_fix, false);
+}
+
 void run_tests() {
   test_daemon_accepts_the_attach_request_and_gui_reads_the_reply();
   test_listed_controller_keeps_the_attached_profile_and_ports();
@@ -276,6 +328,10 @@ void run_tests() {
   test_unmeasured_audio_buffer_surfaces_the_daemon_error_text();
   test_battery_of_a_connected_controller_reaches_the_gui();
   test_controller_that_is_off_lists_no_battery_level();
+  test_firmware_of_a_connected_controller_reaches_the_gui();
+  test_status_reports_the_daemon_version();
+  test_status_before_any_connect_leaves_the_kernel_fix_unknown();
+  test_status_reports_a_kernel_without_the_fix();
 }
 
 } // namespace vds::test
