@@ -7,7 +7,7 @@
   <vendor_url>https://github.com/M0n7y5/vds-mango</vendor_url>
   <action id="io.github.m0n7y5.vds-mango.setup">
     <description>Set up vDS Mango</description>
-    <message>Authentication is required to start the vDS Mango service and to change how Bluetooth handles game controllers</message>
+    <message>Authentication is required to start the vDS Mango service</message>
     <icon_name>input-gaming</icon_name>
     <defaults>
       <allow_any>no</allow_any>

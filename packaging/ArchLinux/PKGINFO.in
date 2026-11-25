@@ -10,7 +10,6 @@ arch = @ARCH@
 license = MIT
 conflict = vds
 depend = bluez
-depend = bluez-libs
 depend = dbus
 depend = gcc-libs
 depend = glibc

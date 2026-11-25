@@ -10,8 +10,6 @@ struct udev_monitor;
 
 namespace vds {
 
-bool bluetooth_hid_device_present(const std::string &address);
-
 /// A DualSense that BlueZ's input plugin connected and hid-playstation drives.
 struct BluezHidPad {
   std::string hidraw;

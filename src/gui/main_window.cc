@@ -26,7 +26,6 @@
 
 #include "controller_dialog.hh"
 #include "main_window.hh"
-#include "setup_helper.hh"
 #include "setup_wizard.hh"
 
 namespace vds::gui {
@@ -69,14 +68,14 @@ QWidget *MainWindow::build_banner() {
       style()->standardIcon(QStyle::SP_MessageBoxWarning).pixmap(24, 24));
   banner_text_ = new QLabel(this);
   banner_text_->setWordWrap(true);
-  auto *setup_button = new QPushButton("Set up", this);
-  connect(setup_button, &QPushButton::clicked, this, [this] { open_setup(); });
+  banner_setup_ = new QPushButton("Set up", this);
+  connect(banner_setup_, &QPushButton::clicked, this, [this] { open_setup(); });
 
   banner_ = new QWidget(this);
   auto *layout = new QHBoxLayout(banner_);
   layout->addWidget(warning_icon);
   layout->addWidget(banner_text_, 1);
-  layout->addWidget(setup_button);
+  layout->addWidget(banner_setup_);
   banner_->hide();
   return banner_;
 }
@@ -180,8 +179,6 @@ QWidget *MainWindow::build_diagnostics_page() {
 void MainWindow::build_menus() {
   auto *setup_menu = menuBar()->addMenu("Setup");
   setup_menu->addAction("Run setup…", this, [this] { open_setup(); });
-  setup_menu->addAction("Restore Bluetooth input…", this,
-                        [this] { restore_bluetooth_input(); });
   auto *help_menu = menuBar()->addMenu("Help");
   help_menu->addAction("About vDS Mango", this, [this] { show_about(); });
 }
@@ -235,16 +232,14 @@ void MainWindow::show_controllers(std::vector<ControllerStatus> controllers) {
   }
   empty_hint_->setVisible(model_.rowCount() == 0);
 
-  bool takeover_needed = false;
+  bool fix_missing = false;
   for (int row = 0; row < model_.rowCount(); ++row) {
-    takeover_needed =
-        takeover_needed || needs_bluetooth_takeover(model_.controller(row));
+    fix_missing = fix_missing || kernel_fix_missing(model_.controller(row));
   }
-  bluetooth_problem_ =
-      takeover_needed ? "This kernel cannot share controllers with the "
-                        "standard Bluetooth support. Run setup to let vDS "
-                        "Mango take them over."
-                      : QString();
+  kernel_problem_ =
+      fix_missing ? "This kernel cannot share controllers with Bluetooth. " +
+                        kKernelRequirement
+                  : QString();
 }
 
 void MainWindow::show_trace(const TraceScopes &scopes) {
@@ -277,8 +272,10 @@ void MainWindow::show_action_error(const QString &title, const QString &error) {
 
 void MainWindow::update_banner() {
   const QString &text =
-      daemon_error_.isEmpty() ? bluetooth_problem_ : daemon_error_;
+      daemon_error_.isEmpty() ? kernel_problem_ : daemon_error_;
   banner_text_->setText(text);
+  // Setup can start the service; it cannot change the kernel.
+  banner_setup_->setVisible(!daemon_error_.isEmpty());
   banner_->setVisible(!text.isEmpty());
 }
 
@@ -293,8 +290,7 @@ void MainWindow::offer_setup_once() {
     return;
   }
   setup_offered_ = true;
-  if (!daemon_error_.isEmpty() || !bluetooth_problem_.isEmpty() ||
-      model_.rowCount() == 0) {
+  if (!daemon_error_.isEmpty() || model_.rowCount() == 0) {
     // Queued so the dialog's event loop does not run inside a reply handler.
     QTimer::singleShot(0, this, [this] { open_setup(); });
   }
@@ -307,36 +303,10 @@ QString MainWindow::selected_address() const {
 }
 
 void MainWindow::open_setup() {
-  SetupWizard wizard(
-      socket_path_, !daemon_error_.isEmpty() || !bluetooth_problem_.isEmpty(),
-      this);
+  SetupWizard wizard(socket_path_, !daemon_error_.isEmpty(), this);
   wizard.exec();
   refresh_controllers();
   refresh_names();
-}
-
-void MainWindow::restore_bluetooth_input() {
-  QMessageBox confirm(
-      QMessageBox::Question, "Restore Bluetooth input",
-      "Bluetooth will handle classic keyboards, mice and gamepads itself "
-      "again.\n\nvDS Mango then shares DualSense controllers with it, which "
-      "needs a kernel that supports it. If this one does not, setup offers "
-      "to take them over again. Bluetooth restarts, so connected devices "
-      "drop for a few seconds.",
-      QMessageBox::Cancel, this);
-  const QPushButton *restore_button =
-      confirm.addButton("Restore", QMessageBox::AcceptRole);
-  confirm.setDefaultButton(QMessageBox::Cancel);
-  confirm.exec();
-  if (confirm.clickedButton() != restore_button) {
-    return;
-  }
-  run_setup_helper(this, {kEnableBluetoothInput}, [this](const QString &error) {
-    if (!error.isEmpty()) {
-      show_action_error("Restore Bluetooth input", error);
-    }
-    refresh_controllers();
-  });
 }
 
 void MainWindow::edit_controller() {

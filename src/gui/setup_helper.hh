@@ -12,8 +12,6 @@ class QObject;
 namespace vds::gui {
 
 inline const QString kStartService = "start-service";
-inline const QString kDisableBluetoothInput = "disable-bluetooth-input";
-inline const QString kEnableBluetoothInput = "enable-bluetooth-input";
 
 /// Runs the root setup helper through polkit, which shows the desktop's
 /// password prompt. on_done receives an empty string on success, otherwise a

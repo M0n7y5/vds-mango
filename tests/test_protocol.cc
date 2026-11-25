@@ -40,7 +40,7 @@ void test_feature_set_packet_keeps_payload_tail() {
 
 void test_bt_input_accepts_minimum_frame() {
   // L12: 66 bytes carries the complete 63-byte USB payload, so acceptance
-  // is by design: L2CAP SEQPACKET preserves frame boundaries and short
+  // is by design: hidraw hands out whole reports and short
   // frames only come from nonconforming pads. The trailing counter/CRC of a
   // 79-byte frame is never read.
   const std::array<std::uint8_t, 66> packet = {

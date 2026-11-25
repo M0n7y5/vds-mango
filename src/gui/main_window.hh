@@ -15,6 +15,7 @@
 class QAction;
 class QCheckBox;
 class QLabel;
+class QPushButton;
 class QTabWidget;
 class QTableView;
 
@@ -43,7 +44,6 @@ private:
   QString selected_address() const;
 
   void open_setup();
-  void restore_bluetooth_input();
   void edit_controller();
   void remove_controller();
   void apply_assignment(const ControllerAssignment &assignment);
@@ -55,13 +55,14 @@ private:
   ControllerModel model_;
   QTimer poll_timer_;
   QString daemon_error_;
-  QString bluetooth_problem_;
+  QString kernel_problem_;
   bool list_pending_ = false;
   bool daemon_known_ = false;
   bool setup_offered_ = false;
 
   QWidget *banner_ = nullptr;
   QLabel *banner_text_ = nullptr;
+  QPushButton *banner_setup_ = nullptr;
   QTabWidget *tabs_ = nullptr;
   QTableView *table_ = nullptr;
   QLabel *empty_hint_ = nullptr;

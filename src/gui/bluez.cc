@@ -29,7 +29,6 @@ constexpr int kPairTimeoutMs = 60000;
 const QString kBluezService = "org.bluez";
 const QString kAdapterInterface = "org.bluez.Adapter1";
 const QString kDeviceInterface = "org.bluez.Device1";
-const QString kClassicHidUuid = "00001124-0000-1000-8000-00805f9b34fb";
 
 QString error_text(const QDBusError &error) {
   if (error.type() == QDBusError::ServiceUnknown) {
@@ -63,8 +62,6 @@ BluetoothDevice device_from(const QString &path,
           controller_profile_from_modalias(
               properties.value("Modalias").toString().toStdString())
               .has_value(),
-      .classic_input =
-          properties.value("UUIDs").toStringList().contains(kClassicHidUuid),
   };
 }
 

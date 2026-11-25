@@ -53,9 +53,7 @@ constexpr std::size_t kOutputLightBrightnessOffset =
 constexpr std::size_t kOutputLedColorOffset =
     offsetof(vds_set_state_data, led_red);
 constexpr std::uint8_t kBtHidpInputPrefix = 0xa1;
-constexpr std::uint8_t kBtHidpOutputPrefix = VDS_BT_OUTPUT_PREFIX;
 constexpr std::uint8_t kBtHidpFeaturePrefix = 0xa3;
-constexpr std::uint8_t kBtHidpGetFeaturePrefix = 0x43;
 constexpr std::uint8_t kBtHidpSetFeaturePrefix = 0x53;
 constexpr std::size_t kBtInputReportIdOffset = 1;
 constexpr std::size_t kBtInputHeaderOffset = 2;
@@ -449,17 +447,6 @@ void fill_feature_report_checksum(std::span<std::uint8_t> report) {
   report[offset + 1] = static_cast<std::uint8_t>((crc >> 8) & 0xff);
   report[offset + 2] = static_cast<std::uint8_t>((crc >> 16) & 0xff);
   report[offset + 3] = static_cast<std::uint8_t>((crc >> 24) & 0xff);
-}
-
-std::vector<std::uint8_t>
-hidp_output_packet(std::span<const std::uint8_t> report) {
-  std::vector<std::uint8_t> packet{kBtHidpOutputPrefix};
-  packet.insert(packet.end(), report.begin(), report.end());
-  return packet;
-}
-
-std::vector<std::uint8_t> feature_get_packet(std::uint8_t report_id) {
-  return {kBtHidpGetFeaturePrefix, report_id};
 }
 
 std::vector<std::uint8_t>

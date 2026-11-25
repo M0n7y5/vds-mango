@@ -5,13 +5,8 @@
 
 set -eu
 
-script_dir=$(
-	unset CDPATH
-	cd -- "$(dirname -- "$0")" && pwd
-)
-
 if [ "$#" -eq 0 ]; then
-	echo "usage: setup-helper.sh start-service|disable-bluetooth-input|enable-bluetooth-input ..." >&2
+	echo "usage: setup-helper.sh start-service" >&2
 	exit 2
 fi
 
@@ -21,14 +16,6 @@ for action in "$@"; do
 		# A unit that failed too often refuses to start until it is reset.
 		systemctl reset-failed vdsd.service 2>/dev/null || true
 		systemctl enable --now vdsd.service
-		;;
-	disable-bluetooth-input)
-		"$script_dir/override-bluetoothd.sh" --restart disable-input
-		# vdsd keeps a controller's "cannot share" error until it restarts.
-		systemctl try-restart vdsd.service
-		;;
-	enable-bluetooth-input)
-		"$script_dir/override-bluetoothd.sh" --restart enable-input
 		;;
 	*)
 		echo "unknown action: $action" >&2

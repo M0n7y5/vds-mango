@@ -56,9 +56,6 @@ struct AudioChunk {
 void fill_output_report_checksum(std::span<std::uint8_t> report);
 void fill_feature_report_checksum(std::span<std::uint8_t> report);
 std::vector<std::uint8_t>
-hidp_output_packet(std::span<const std::uint8_t> report);
-std::vector<std::uint8_t> feature_get_packet(std::uint8_t report_id);
-std::vector<std::uint8_t>
 feature_set_packet(std::span<const std::uint8_t> report);
 BtInputPayloadType bt_input_payload_type(std::span<const std::uint8_t> packet);
 std::optional<std::span<const std::uint8_t, kMicOpusSize>>

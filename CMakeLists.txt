@@ -8,7 +8,6 @@ option(BUILD_TESTS "Build unit tests" OFF)
 include(GNUInstallDirs)
 
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(BLUEZ REQUIRED IMPORTED_TARGET bluez)
 pkg_check_modules(DBUS REQUIRED IMPORTED_TARGET dbus-1)
 pkg_check_modules(OPUS REQUIRED IMPORTED_TARGET opus)
 pkg_check_modules(UDEV REQUIRED IMPORTED_TARGET libudev)
@@ -158,7 +157,7 @@ if(BUILD_TESTS)
 endif()
 
 add_library(vds_bt OBJECT src/vds_bt.cc)
-target_link_libraries(vds_bt PUBLIC vds_protocol vds_io PkgConfig::BLUEZ)
+target_link_libraries(vds_bt PUBLIC vds_protocol)
 
 add_library(vds_bluez OBJECT src/vds_bluez.cc)
 target_include_directories(vds_bluez PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
@@ -235,7 +234,6 @@ set(VDS_INSTALLED_FILES
     "${CMAKE_INSTALL_FULL_DATADIR}/applications/vds-mango.desktop"
     "${CMAKE_INSTALL_FULL_DATADIR}/polkit-1/actions/io.github.m0n7y5.vds-mango.policy"
     "${CMAKE_INSTALL_FULL_DATADIR}/vds-mango/setup-helper.sh"
-    "${CMAKE_INSTALL_FULL_DATADIR}/vds-mango/override-bluetoothd.sh"
     "${CMAKE_INSTALL_FULL_DATADIR}/wireplumber/wireplumber.conf.d/99-vds-dualsense-wireplumber.conf"
 )
 set(VDS_INSTALL_SERVICE_SCRIPT
@@ -283,7 +281,7 @@ install(FILES data/vds-mango.desktop
         DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
 install(FILES ${VDS_POLKIT_POLICY}
         DESTINATION ${CMAKE_INSTALL_DATADIR}/polkit-1/actions)
-install(PROGRAMS scripts/setup-helper.sh scripts/override-bluetoothd.sh
+install(PROGRAMS scripts/setup-helper.sh
         DESTINATION ${CMAKE_INSTALL_DATADIR}/vds-mango)
 install(FILES data/99-vds-dualsense-wireplumber.conf
         DESTINATION ${CMAKE_INSTALL_DATADIR}/wireplumber/wireplumber.conf.d)

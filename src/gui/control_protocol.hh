@@ -49,9 +49,14 @@ struct TraceScopes {
   bool output = false;
 };
 
-/// The controller cannot be shared with the standard Bluetooth support on
-/// this kernel, so vDS Mango has to take Bluetooth input over.
-bool needs_bluetooth_takeover(const ControllerStatus &controller);
+/// The controller cannot connect because this kernel's hid-playstation lacks
+/// the Bluetooth audio fix.
+bool kernel_fix_missing(const ControllerStatus &controller);
+
+/// What the user needs when kernel_fix_missing() holds.
+inline const QString kKernelRequirement =
+    "vDS Mango needs a kernel with the DualSense audio fix: linux-cachyos "
+    "7.3.6 or newer.";
 
 QByteArray list_request();
 QByteArray list_targets_request();

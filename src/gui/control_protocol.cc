@@ -99,7 +99,7 @@ QJsonObject command_reply(const QByteArray &reply) {
 
 } // namespace
 
-bool needs_bluetooth_takeover(const ControllerStatus &controller) {
+bool kernel_fix_missing(const ControllerStatus &controller) {
   return controller.error ==
          QString::fromUtf8(kBluetoothSharingUnsupported.data(),
                            static_cast<qsizetype>(

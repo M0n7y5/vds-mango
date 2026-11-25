@@ -18,9 +18,6 @@ struct BluetoothDevice {
   bool trusted = false;
   /// A DualSense or DualSense Edge.
   bool supported_controller = false;
-  /// Served by the BlueZ input plugin, so it stops working while that plugin
-  /// is off. Bluetooth LE input devices use another plugin and are not marked.
-  bool classic_input = false;
 };
 
 /// Talks to bluetoothd over the system bus without blocking. Every call ends

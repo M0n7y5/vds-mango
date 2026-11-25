@@ -1,16 +1,13 @@
 // SPDX-License-Identifier: MIT
 // Copyright (C) 2026 M0n7y5 <17201053+M0n7y5@users.noreply.github.com>
 
-#include <algorithm>
 #include <utility>
 #include <vector>
 
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QListWidget>
-#include <QPushButton>
 #include <QSet>
-#include <QStringList>
 #include <QStyle>
 #include <QTimer>
 #include <QVBoxLayout>
@@ -58,45 +55,18 @@ private:
   QLabel *text_ = nullptr;
 };
 
-QString takeover_explanation(const std::vector<BluetoothDevice> &devices) {
-  QStringList affected;
-  for (const BluetoothDevice &device : devices) {
-    if (device.paired && device.classic_input &&
-        !device.supported_controller) {
-      affected.append(device.name);
-    }
-  }
-  return "This kernel cannot share a DualSense between the standard "
-         "Bluetooth support and vDS Mango yet. vDS Mango can take over "
-         "classic Bluetooth keyboards, mice and gamepads instead, because "
-         "only one program can receive them. Bluetooth audio is not "
-         "affected. Bluetooth restarts, so connected devices drop for a few "
-         "seconds.\n\n" +
-         (affected.isEmpty()
-              ? QString("None of your paired devices is affected.")
-              : "These paired devices stop working until you undo this under "
-                "Setup > Restore Bluetooth input: " +
-                    affected.join(", ") + ".");
-}
-
 class PreparePage : public QWizardPage {
 public:
-  PreparePage(ControlClient &client, Bluez &bluez)
-      : client_(client), bluez_(bluez) {
+  explicit PreparePage(ControlClient &client) : client_(client) {
     setTitle("Prepare this computer");
     setSubTitle("vDS Mango needs its background service.");
 
     service_row_ = new StatusRow(this);
-    bluetooth_row_ = new StatusRow(this);
-    bluetooth_row_->hide();
-    explanation_ = wrapped_label({}, this);
     problem_ = wrapped_label({}, this);
 
     auto *layout = new QVBoxLayout(this);
     layout->addWidget(service_row_);
-    layout->addWidget(bluetooth_row_);
     layout->addSpacing(8);
-    layout->addWidget(explanation_);
     layout->addWidget(problem_);
     layout->addStretch(1);
 
@@ -115,20 +85,13 @@ public:
   bool isComplete() const override { return !busy_ && service_known_; }
 
   bool validatePage() override {
-    if (ready()) {
+    if (service_ok_) {
       return true;
-    }
-    QStringList actions;
-    if (takeover_needed_) {
-      actions.append(kDisableBluetoothInput);
-    }
-    if (!service_ok_) {
-      actions.append(kStartService);
     }
     busy_ = true;
     problem_->setText("Waiting for the password prompt...");
     emit completeChanged();
-    run_setup_helper(this, actions, [this](const QString &error) {
+    run_setup_helper(this, {kStartService}, [this](const QString &error) {
       busy_ = false;
       advance_when_ready_ = error.isEmpty();
       problem_->setText(error);
@@ -139,65 +102,32 @@ public:
   }
 
 private:
-  bool ready() const { return service_ok_ && !takeover_needed_; }
-
   void refresh() {
     client_.send(
-        list_request(),
-        [this](const QByteArray &reply) {
-          const auto controllers = parse_list_reply(reply);
-          show_service({},
-                       std::any_of(controllers.begin(), controllers.end(),
-                                   needs_bluetooth_takeover));
-        },
-        [this](const QString &error) { show_service(error, false); });
+        list_request(), [this](const QByteArray &) { show_service({}); },
+        [this](const QString &error) { show_service(error); });
   }
 
-  void show_service(const QString &error, bool takeover_needed) {
+  void show_service(const QString &error) {
     service_known_ = true;
     service_ok_ = error.isEmpty();
-    takeover_needed_ = takeover_needed;
     service_row_->show_state(service_ok_,
                              service_ok_ ? "The background service is running."
                                          : error);
-    bluetooth_row_->setVisible(takeover_needed_);
-    if (!takeover_needed_) {
-      explanation_->clear();
-      update_page();
-      return;
-    }
-    bluetooth_row_->show_state(false, "Bluetooth cannot share DualSense "
-                                      "controllers with vDS Mango.");
-    bluez_.list_devices(
-        [this](const std::vector<BluetoothDevice> &devices) {
-          explanation_->setText(takeover_explanation(devices));
-          update_page();
-        },
-        [this](const QString &problem) {
-          explanation_->setText(problem);
-          update_page();
-        });
-  }
-
-  void update_page() {
-    setButtonText(QWizard::NextButton, ready() ? "Next" : "Set up");
+    setButtonText(QWizard::NextButton, service_ok_ ? "Next" : "Set up");
     emit completeChanged();
-    if (advance_when_ready_ && ready()) {
+    if (advance_when_ready_ && service_ok_) {
       advance_when_ready_ = false;
       wizard()->next();
     }
   }
 
   ControlClient &client_;
-  Bluez &bluez_;
   QTimer timer_;
   StatusRow *service_row_ = nullptr;
-  StatusRow *bluetooth_row_ = nullptr;
-  QLabel *explanation_ = nullptr;
   QLabel *problem_ = nullptr;
   bool service_known_ = false;
   bool service_ok_ = false;
-  bool takeover_needed_ = false;
   bool busy_ = false;
   bool advance_when_ready_ = false;
 };
@@ -340,26 +270,20 @@ private:
 
 class ConnectPage : public QWizardPage {
 public:
-  ConnectPage(ControlClient &client, Bluez &bluez,
-              const QString &added_address)
-      : client_(client), bluez_(bluez), added_address_(added_address) {
+  ConnectPage(ControlClient &client, const QString &added_address)
+      : client_(client), added_address_(added_address) {
     setTitle("Connect the controller");
     setFinalPage(true);
 
     row_ = new StatusRow(this);
     explanation_ = wrapped_label({}, this);
-    takeover_button_ = new QPushButton("Take over Bluetooth input", this);
-    takeover_button_->hide();
     auto *layout = new QVBoxLayout(this);
     layout->addWidget(row_);
     layout->addSpacing(8);
     layout->addWidget(explanation_);
-    layout->addWidget(takeover_button_, 0, Qt::AlignLeft);
     layout->addStretch(1);
 
     connect(&timer_, &QTimer::timeout, this, [this] { refresh(); });
-    connect(takeover_button_, &QPushButton::clicked, this,
-            [this] { take_over(); });
   }
 
   void initializePage() override {
@@ -369,9 +293,6 @@ public:
 
 private:
   void refresh() {
-    if (busy_) {
-      return;
-    }
     client_.send(
         list_request(),
         [this](const QByteArray &reply) {
@@ -386,25 +307,12 @@ private:
   }
 
   void show_controller(const ControllerStatus &controller) {
-    if (busy_) {
-      return;
-    }
-    const bool takeover = needs_bluetooth_takeover(controller);
-    takeover_button_->setVisible(takeover);
-    if (takeover) {
-      row_->show_state(false, "Bluetooth cannot share this controller with "
-                              "vDS Mango.");
-      bluez_.list_devices(
-          [this](const std::vector<BluetoothDevice> &devices) {
-            if (!busy_ && takeover_button_->isVisible()) {
-              explanation_->setText(takeover_explanation(devices));
-            }
-          },
-          [this](const QString &problem) {
-            if (!busy_ && takeover_button_->isVisible()) {
-              explanation_->setText(problem);
-            }
-          });
+    if (kernel_fix_missing(controller)) {
+      row_->show_state(false, "This kernel cannot share the controller with "
+                              "Bluetooth.");
+      explanation_->setText(kKernelRequirement +
+                            " Until then the controller stays an ordinary "
+                            "Bluetooth gamepad.");
       return;
     }
     explanation_->clear();
@@ -420,27 +328,11 @@ private:
     }
   }
 
-  void take_over() {
-    busy_ = true;
-    takeover_button_->setEnabled(false);
-    explanation_->setText("Waiting for the password prompt...");
-    run_setup_helper(this, {kDisableBluetoothInput},
-                     [this](const QString &error) {
-                       busy_ = false;
-                       takeover_button_->setEnabled(true);
-                       explanation_->setText(error);
-                       refresh();
-                     });
-  }
-
   ControlClient &client_;
-  Bluez &bluez_;
   const QString &added_address_;
   QTimer timer_;
   StatusRow *row_ = nullptr;
   QLabel *explanation_ = nullptr;
-  QPushButton *takeover_button_ = nullptr;
-  bool busy_ = false;
 };
 
 } // namespace
@@ -455,10 +347,10 @@ SetupWizard::SetupWizard(const QString &socket_path, bool prepare_needed,
   setOption(QWizard::NoCancelButtonOnLastPage);
   resize(620, 420);
 
-  setPage(PreparePageId, new PreparePage(client_, bluez_));
+  setPage(PreparePageId, new PreparePage(client_));
   setPage(ControllerPageId,
           new ControllerPage(client_, bluez_, added_address_));
-  setPage(ConnectPageId, new ConnectPage(client_, bluez_, added_address_));
+  setPage(ConnectPageId, new ConnectPage(client_, added_address_));
   setStartId(prepare_needed ? PreparePageId : ControllerPageId);
 }
 

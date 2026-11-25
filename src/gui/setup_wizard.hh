@@ -10,13 +10,12 @@
 
 namespace vds::gui {
 
-/// First-run and "add controller" flow: prepares the computer (service, and
-/// Bluetooth where the kernel cannot share a controller), pairs and registers
-/// a controller, then waits for it to connect.
+/// First-run and "add controller" flow: starts the service if needed, pairs
+/// and registers a controller, then waits for it to connect.
 class SetupWizard : public QWizard {
 public:
-  /// prepare_needed starts at the page that fixes the service and Bluetooth;
-  /// otherwise the wizard starts at picking a controller.
+  /// prepare_needed starts at the page that starts the service; otherwise
+  /// the wizard starts at picking a controller.
   SetupWizard(const QString &socket_path, bool prepare_needed,
               QWidget *parent);
 

@@ -92,8 +92,6 @@ constexpr auto kOutputTraceFeatureSlowWarn = std::chrono::milliseconds(20);
  */
 constexpr auto kAudioOutputInterval = std::chrono::milliseconds(10);
 constexpr auto kHapticsOutputBlockedRetry = std::chrono::milliseconds(2);
-constexpr auto kBluetoothPreemptWait = std::chrono::milliseconds(2000);
-constexpr auto kBluetoothPreemptPoll = std::chrono::milliseconds(100);
 constexpr auto kSleepUnplugWait = std::chrono::milliseconds(1000);
 constexpr auto kSleepUnplugPoll = std::chrono::milliseconds(5);
 constexpr int kInitialFeatureReportPollMs = 5000;
@@ -232,8 +230,6 @@ struct VirtualPort {
   std::array<bool, 256> feature_cached;
   std::vector<std::uint8_t> pending_feature_reports;
   TraceState trace_state;
-  /* BlueZ keeps the physical pad connected and hid-playstation drives it. */
-  bool shared_with_bluez = false;
 };
 
 struct ControllerRuntime {
@@ -241,8 +237,6 @@ struct ControllerRuntime {
   std::string device;
   std::optional<std::uint32_t> detected_profile;
   std::optional<vds::BtBackend> backend;
-  vds::UniqueFd pending_control_fd;
-  vds::UniqueFd pending_interrupt_fd;
   bool virtual_connected = false;
   std::string last_error;
   /* BlueZ was asked to drop the pad so it reconnects hidden. */
@@ -257,8 +251,6 @@ enum class EventType : std::uint32_t {
   Port = 2,
   BtControl = 3,
   BtInterrupt = 4,
-  BtAcceptControl = 5,
-  BtAcceptInterrupt = 6,
   Udev = 7,
   Signal = 8,
   Usb = 9,
@@ -546,11 +538,9 @@ bool write_vds_frame(VirtualPort &port, std::span<const std::uint8_t> bytes,
  * virtual pad then reports the locally administered form of that address.
  */
 std::vector<std::uint8_t>
-usb_feature_report(const VirtualPort &port,
-                   std::span<const std::uint8_t> report) {
+usb_feature_report(std::span<const std::uint8_t> report) {
   std::vector<std::uint8_t> usb_report(report.begin(), report.end());
-  if (port.shared_with_bluez &&
-      usb_report.size() > kPairingInfoAddressMsbOffset &&
+  if (usb_report.size() > kPairingInfoAddressMsbOffset &&
       usb_report[0] == kPairingInfoReportId) {
     usb_report[kPairingInfoAddressMsbOffset] |= 0x02;
   }
@@ -565,7 +555,7 @@ void cache_feature_report(VirtualPort &port,
   }
 
   const std::uint8_t report_id = report[0];
-  port.feature_cache[report_id] = usb_feature_report(port, report);
+  port.feature_cache[report_id] = usb_feature_report(report);
   port.feature_cached[report_id] = true;
 
   const auto frame = vds::frame_bytes(VDS_FRAME_USB_FEATURE_REPLY,
@@ -578,7 +568,8 @@ bool try_send_control_write(vds::BtBackend &bt_backend,
   if (write.is_set) {
     return bt_backend.try_send_feature_set(write.payload);
   }
-  return bt_backend.try_send_feature_get(write.report_id);
+  bt_backend.send_feature_get(write.report_id);
+  return true;
 }
 
 bool queue_control_write(VirtualPort &port, PendingControlWrite write,
@@ -750,7 +741,6 @@ void reset_virtual_port(VirtualPort &port) {
   port.feature_cached = {};
   port.pending_feature_reports.clear();
   port.trace_state = TraceState{};
-  port.shared_with_bluez = false;
 }
 
 void disconnect_virtual_port(VirtualPort &port, vds::Logger &logger) {
@@ -1409,7 +1399,7 @@ bool handle_bt_control(VirtualPort &port, vds::BtBackend &bt_backend,
   }
 
   const std::uint8_t report_id = (*report)[0];
-  port.feature_cache[report_id] = usb_feature_report(port, *report);
+  port.feature_cache[report_id] = usb_feature_report(*report);
   port.feature_cached[report_id] = true;
 
   const auto pending = std::find(port.pending_feature_reports.begin(),
@@ -1452,7 +1442,9 @@ void initialize_bt_controller(vds::BtBackend &bt_backend,
               : static_cast<int>(
                     std::chrono::ceil<std::chrono::milliseconds>(remaining)
                         .count());
-      pollfd pfd{.fd = bt_backend.control_fd(), .events = POLLIN, .revents = 0};
+      pollfd pfd{.fd = bt_backend.feature_reply_fd(),
+                 .events = POLLIN,
+                 .revents = 0};
       const int ready = ::poll(&pfd, 1, wait_ms);
       if (ready < 0 && errno == EINTR) {
         continue;
@@ -1510,8 +1502,7 @@ std::vector<unsigned> present_port_indices(std::span<const VirtualPort> ports) {
 }
 
 bool controller_uses_port(const ControllerRuntime &controller) {
-  return controller.backend || controller.pending_control_fd ||
-         controller.pending_interrupt_fd || controller.virtual_connected;
+  return controller.backend || controller.virtual_connected;
 }
 
 bool port_used_by_other_controller(
@@ -1575,17 +1566,6 @@ controller_for_port(std::vector<ControllerRuntime> &controllers,
   return nullptr;
 }
 
-ControllerRuntime *
-controller_for_address(std::vector<ControllerRuntime> &controllers,
-                       const std::string &address) {
-  for (auto &controller : controllers) {
-    if (controller.config.address == address) {
-      return &controller;
-    }
-  }
-  return nullptr;
-}
-
 void drop_bt_backend(ControllerRuntime &controller, VirtualPort &port,
                      const std::string &reason, vds::Logger &logger) {
   if (!controller.backend && !controller.virtual_connected) {
@@ -1598,8 +1578,6 @@ void drop_bt_backend(ControllerRuntime &controller, VirtualPort &port,
              "backend disconnected address=" + controller.config.address +
                  " device=" + controller.device + " reason=" + reason);
   controller.backend.reset();
-  controller.pending_control_fd.reset();
-  controller.pending_interrupt_fd.reset();
   controller.virtual_connected = false;
   controller.device.clear();
   disconnect_virtual_port(port, logger);
@@ -1612,182 +1590,6 @@ std::vector<VirtualPort> create_virtual_ports() {
     ports[index].usb = std::make_unique<vds::UsbipPort>();
   }
   return ports;
-}
-
-void preempt_default_bluetooth_owner(const std::string &address,
-                                     vds::Logger &logger) {
-  if (!vds::bluetooth_hid_device_present(address)) {
-    return;
-  }
-
-  logger.log(vds::LogScope::Bluetooth, vds::LogLevel::Warn,
-             "preempting default Bluetooth HID owner address=" + address);
-  try {
-    if (!vds::disconnect_bluez_device(address)) {
-      logger.log(vds::LogScope::Bluetooth, vds::LogLevel::Warn,
-                 "BlueZ device not found for disconnect address=" + address);
-    }
-  } catch (const std::exception &error) {
-    logger.log(vds::LogScope::Bluetooth, vds::LogLevel::Warn,
-               "BlueZ disconnect failed address=" + address +
-                   " error=" + error.what());
-  }
-
-  const auto deadline = Clock::now() + kBluetoothPreemptWait;
-  while (Clock::now() < deadline) {
-    if (!vds::bluetooth_hid_device_present(address)) {
-      logger.log(vds::LogScope::Bluetooth, vds::LogLevel::Info,
-                 "default stack released address=" + address);
-      return;
-    }
-    std::this_thread::sleep_for(kBluetoothPreemptPoll);
-  }
-
-  logger.log(vds::LogScope::Bluetooth, vds::LogLevel::Warn,
-             "default Bluetooth HID owner still present address=" + address);
-}
-
-void complete_pending_controller(ControllerRuntime &controller,
-                                 VirtualPort &port, vds::Logger &logger) {
-  const std::uint32_t profile = resolve_config_profile(controller.config);
-  preempt_default_bluetooth_owner(controller.config.address, logger);
-
-  vds::BtBackend candidate(controller.config.address,
-                                std::move(controller.pending_control_fd),
-                                std::move(controller.pending_interrupt_fd));
-
-  reset_virtual_port(port);
-  port.usb->disconnect();
-  initialize_bt_controller(candidate, port, logger);
-  candidate.send_output_report(port.output_state.build_bt_init_report());
-  port.last_sent_bt_state = port.output_state.state();
-  logger.log(vds::LogScope::Hid, vds::LogLevel::Info,
-             port.path + " sent initial Bluetooth state report");
-
-  controller.backend = std::move(candidate);
-  controller.detected_profile = profile;
-  port.usb->connect(profile);
-  controller.virtual_connected = true;
-  controller.last_error.clear();
-
-  logger.log(
-      vds::LogScope::Bluetooth, vds::LogLevel::Info,
-      "raw L2CAP backend connected address=" + controller.config.address +
-          " device=" + port.path + " profile=" + profile_name(profile));
-}
-
-void handle_bt_accept(std::vector<VirtualPort> &ports,
-                      std::vector<ControllerRuntime> &controllers,
-                      vds::BtL2capAcceptor &acceptor, bool control_channel,
-                      vds::Logger &logger, bool &epoll_dirty,
-                      unsigned &accept_failures) {
-  while (true) {
-    std::optional<vds::BtAcceptedChannel> accepted;
-    try {
-      accepted = control_channel ? acceptor.accept_control()
-                                 : acceptor.accept_interrupt();
-    } catch (const vds::BluetoothLinkError &error) {
-      /*
-       * A connection that cannot be accepted stays queued and keeps the
-       * listener readable, so a permanent failure such as EMFILE would spin
-       * the loop. Escalate to fatal once retrying has clearly stopped
-       * helping; a per-connection failure resets the count below.
-       */
-      if (++accept_failures >= kMaxAcceptFailures) {
-        throw;
-      }
-      logger.log(vds::LogScope::Bluetooth, vds::LogLevel::Error, error.what());
-      return;
-    }
-    accept_failures = 0;
-    if (!accepted) {
-      return;
-    }
-
-    ControllerRuntime *controller =
-        controller_for_address(controllers, accepted->address);
-    if (!controller) {
-      logger.log(vds::LogScope::Bluetooth, vds::LogLevel::Warn,
-                 "rejected raw HID channel from unregistered address=" +
-                     accepted->address);
-      continue;
-    }
-    if (controller->backend) {
-      logger.log(vds::LogScope::Bluetooth, vds::LogLevel::Warn,
-                 "rejected duplicate raw HID channel address=" +
-                     accepted->address);
-      continue;
-    }
-
-    std::optional<std::size_t> port_index;
-    if (!controller->device.empty()) {
-      port_index = find_port_index(ports, controller->device);
-      if (port_index && port_used_by_other_controller(controllers, *controller,
-                                                      controller->device)) {
-        port_index.reset();
-      }
-    }
-    if (!port_index) {
-      port_index = available_port_index(ports, controllers, *controller);
-      if (!port_index) {
-        controller->last_error = "no available virtual port";
-        logger.log(vds::LogScope::Port, vds::LogLevel::Warn,
-                   "rejected raw HID channel address=" + accepted->address +
-                       " reason=no available virtual port");
-        continue;
-      }
-      controller->device = ports[*port_index].path;
-      logger.log(vds::LogScope::Config, vds::LogLevel::Info,
-                 "controller assigned address=" + controller->config.address +
-                     " device=" + controller->device + " profile=\"" +
-                     vds::controller_profile_name(controller->config.profile) +
-                     "\"");
-    }
-
-    if (control_channel) {
-      controller->pending_control_fd = std::move(accepted->fd);
-      logger.log(vds::LogScope::Bluetooth, vds::LogLevel::Info,
-                 "accepted raw HID control channel address=" +
-                     accepted->address);
-    } else {
-      controller->pending_interrupt_fd = std::move(accepted->fd);
-      logger.log(vds::LogScope::Bluetooth, vds::LogLevel::Info,
-                 "accepted raw HID interrupt channel address=" +
-                     accepted->address);
-    }
-
-    if (!controller->pending_control_fd || !controller->pending_interrupt_fd) {
-      continue;
-    }
-
-    port_index = find_port_index(ports, controller->device);
-    if (!port_index) {
-      controller->pending_control_fd.reset();
-      controller->pending_interrupt_fd.reset();
-      controller->device.clear();
-      controller->last_error = "assigned virtual port disappeared";
-      logger.log(vds::LogScope::Port, vds::LogLevel::Error,
-                 "controller inactive address=" + controller->config.address +
-                     " reason=assigned port disappeared");
-      continue;
-    }
-
-    try {
-      complete_pending_controller(*controller, ports[*port_index], logger);
-      epoll_dirty = true;
-    } catch (const std::exception &error) {
-      controller->backend.reset();
-      controller->pending_control_fd.reset();
-      controller->pending_interrupt_fd.reset();
-      controller->virtual_connected = false;
-      controller->device.clear();
-      controller->last_error = error.what();
-      logger.log(vds::LogScope::Bluetooth, vds::LogLevel::Error,
-                 "connect failed address=" + controller->config.address +
-                     " device=" + ports[*port_index].path +
-                     " error=" + error.what());
-    }
-  }
 }
 
 void sync_hidden_pad_markers(std::span<const ControllerRuntime> controllers,
@@ -1855,7 +1657,7 @@ kernel_misreads_bluetooth_audio(vds::BtBackend &bt_backend, VirtualPort &port,
     }
 
     std::array<pollfd, 2> fds = {{
-        {.fd = bt_backend.interrupt_fd(), .events = POLLIN, .revents = 0},
+        {.fd = bt_backend.hidraw_fd(), .events = POLLIN, .revents = 0},
         {.fd = gamepad.get(), .events = POLLIN, .revents = 0},
     }};
     (void)::poll(fds.data(), fds.size(), kPendingOutputPollMs);
@@ -1910,11 +1712,9 @@ void complete_shared_controller(ControllerRuntime &controller,
                              std::strerror(errno));
   }
   const std::uint32_t profile = resolve_config_profile(controller.config);
-  auto candidate = vds::BtBackend::from_hidraw(controller.config.address,
-                                               std::move(hidraw_fd));
+  vds::BtBackend candidate(controller.config.address, std::move(hidraw_fd));
 
   reset_virtual_port(port);
-  port.shared_with_bluez = true;
   port.usb->disconnect();
   initialize_bt_controller(candidate, port, logger);
   candidate.send_output_report(port.output_state.build_bt_init_report());
@@ -1945,11 +1745,7 @@ void complete_shared_controller(ControllerRuntime &controller,
                  " profile=" + profile_name(profile));
 }
 
-/*
- * Takes over registered pads that BlueZ's input plugin connected. With the
- * plugin off they arrive on the raw HID channels instead and never show up
- * here.
- */
+/* Attaches registered pads that BlueZ's input plugin connected. */
 void attach_bluez_pads(std::vector<VirtualPort> &ports,
                        std::vector<ControllerRuntime> &controllers,
                        BluetoothSharing &sharing, vds::Logger &logger,
@@ -2215,8 +2011,6 @@ void flush_pending_outputs(std::vector<VirtualPort> &ports,
     const auto port_index = find_port_index(ports, controller.device);
     if (!port_index) {
       controller.backend.reset();
-      controller.pending_control_fd.reset();
-      controller.pending_interrupt_fd.reset();
       controller.virtual_connected = false;
       controller.device.clear();
       epoll_dirty = true;
@@ -2286,8 +2080,6 @@ void reconcile_controller_configs(std::vector<VirtualPort> &ports,
         .device = {},
         .detected_profile = std::nullopt,
         .backend = std::nullopt,
-        .pending_control_fd = {},
-        .pending_interrupt_fd = {},
         .virtual_connected = false,
         .last_error = {},
         .bluez_kicked = false,
@@ -2317,8 +2109,6 @@ void reconcile_controller_configs(std::vector<VirtualPort> &ports,
       if (old_uses_port && old_device_available) {
         next.device = std::move(old.device);
         next.backend = std::move(old.backend);
-        next.pending_control_fd = std::move(old.pending_control_fd);
-        next.pending_interrupt_fd = std::move(old.pending_interrupt_fd);
         next.virtual_connected = old.virtual_connected;
         active_devices.push_back(next.device);
       } else if (old_uses_port) {
@@ -2328,13 +2118,11 @@ void reconcile_controller_configs(std::vector<VirtualPort> &ports,
         }
         if (old.backend) {
           logger.log(vds::LogScope::Bluetooth, vds::LogLevel::Info,
-                     "raw backend removed address=" + old.config.address +
+                     "backend removed address=" + old.config.address +
                          " device=" + old.device);
         }
         old.backend.reset();
         release_shared_pad(old.config.address, logger);
-        old.pending_control_fd.reset();
-        old.pending_interrupt_fd.reset();
         old.virtual_connected = false;
         old.device.clear();
       }
@@ -2362,7 +2150,7 @@ void reconcile_controller_configs(std::vector<VirtualPort> &ports,
     if (controllers[i].backend) {
       logger.log(
           vds::LogScope::Bluetooth, vds::LogLevel::Info,
-          "raw backend removed address=" + controllers[i].config.address +
+          "backend removed address=" + controllers[i].config.address +
               " device=" + controllers[i].device);
     }
     release_shared_pad(controllers[i].config.address, logger);
@@ -2419,8 +2207,7 @@ void handle_control_client(int control_fd, std::span<VirtualPort> ports,
     /*
      * An unaccepted connection stays queued and keeps the listener readable,
      * so a permanent failure such as EMFILE would spin the loop. Escalate to
-     * fatal once retrying has clearly stopped helping, mirroring
-     * handle_bt_accept.
+     * fatal once retrying has clearly stopped helping.
      */
     if (++accept_failures >= kMaxAcceptFailures) {
       throw std::runtime_error("accept control client failed: " +
@@ -2597,7 +2384,6 @@ void add_epoll_fd(int epoll_fd, int fd, EventType type, std::size_t index) {
 }
 
 vds::UniqueFd rebuild_epoll(int control_fd, int signal_fd,
-                            vds::BtL2capAcceptor &bt_acceptor,
                             const vds::InputDeviceMonitor &input_monitor,
                             int sleep_fd, std::span<VirtualPort> ports,
                             std::span<ControllerRuntime> controllers) {
@@ -2610,10 +2396,6 @@ vds::UniqueFd rebuild_epoll(int control_fd, int signal_fd,
   add_epoll_fd(epoll_fd.get(), control_fd, EventType::Control, 0);
   add_epoll_fd(epoll_fd.get(), signal_fd, EventType::Signal, 0);
   add_epoll_fd(epoll_fd.get(), input_monitor.fd(), EventType::Udev, 0);
-  add_epoll_fd(epoll_fd.get(), bt_acceptor.control_listener_fd(),
-               EventType::BtAcceptControl, 0);
-  add_epoll_fd(epoll_fd.get(), bt_acceptor.interrupt_listener_fd(),
-               EventType::BtAcceptInterrupt, 0);
   if (sleep_fd >= 0) {
     add_epoll_fd(epoll_fd.get(), sleep_fd, EventType::Sleep, 0);
   }
@@ -2625,9 +2407,9 @@ vds::UniqueFd rebuild_epoll(int control_fd, int signal_fd,
     if (!controllers[i].backend) {
       continue;
     }
-    add_epoll_fd(epoll_fd.get(), controllers[i].backend->control_fd(),
+    add_epoll_fd(epoll_fd.get(), controllers[i].backend->feature_reply_fd(),
                  EventType::BtControl, i);
-    add_epoll_fd(epoll_fd.get(), controllers[i].backend->interrupt_fd(),
+    add_epoll_fd(epoll_fd.get(), controllers[i].backend->hidraw_fd(),
                  EventType::BtInterrupt, i);
   }
   return epoll_fd;
@@ -2703,10 +2485,7 @@ int run_daemon(const Options &options, vds::Logger &logger) {
   const vds::UniqueFd signal_fd = create_signal_fd();
 
   vds::UniqueFd control_fd(open_control_socket(options.socket));
-  vds::BtL2capAcceptor bt_acceptor;
   vds::InputDeviceMonitor input_monitor;
-  logger.log(vds::LogScope::Bluetooth, vds::LogLevel::Info,
-             "listening for controller-initiated raw HID channels");
   SocketPathGuard control_socket_path(options.socket);
   std::vector<VirtualPort> ports = create_virtual_ports();
   logger.log(vds::LogScope::Port, vds::LogLevel::Info,
@@ -2727,7 +2506,6 @@ int run_daemon(const Options &options, vds::Logger &logger) {
   bool reload_requested = true;
   bool epoll_dirty = true;
   bool first_reload = true;
-  unsigned bt_accept_failures = 0;
   unsigned control_accept_failures = 0;
   BluetoothSharing sharing = BluetoothSharing::Unknown;
   bool scan_bluez_pads = false;
@@ -2786,8 +2564,7 @@ int run_daemon(const Options &options, vds::Logger &logger) {
     }
 
     if (epoll_dirty || !epoll_fd) {
-      epoll_fd = rebuild_epoll(control_fd.get(), signal_fd.get(), bt_acceptor,
-                               input_monitor,
+      epoll_fd = rebuild_epoll(control_fd.get(), signal_fd.get(), input_monitor,
                                sleep_guard ? sleep_guard->fd() : -1, ports,
                                controllers);
       epoll_dirty = false;
@@ -2830,19 +2607,6 @@ int run_daemon(const Options &options, vds::Logger &logger) {
         }
         if ((revents & (EPOLLERR | EPOLLHUP)) != 0) {
           throw std::runtime_error("control socket epoll error");
-        }
-        continue;
-      }
-
-      if (source.type == EventType::BtAcceptControl ||
-          source.type == EventType::BtAcceptInterrupt) {
-        if ((revents & EPOLLIN) != 0 && !asleep) {
-          handle_bt_accept(ports, controllers, bt_acceptor,
-                           source.type == EventType::BtAcceptControl, logger,
-                           epoll_dirty, bt_accept_failures);
-        }
-        if ((revents & (EPOLLERR | EPOLLHUP)) != 0) {
-          throw std::runtime_error("Bluetooth listener epoll error");
         }
         continue;
       }
@@ -2982,7 +2746,7 @@ int run_daemon(const Options &options, vds::Logger &logger) {
         }
         if ((revents & (EPOLLERR | EPOLLHUP)) != 0) {
           drop_bt_backend(controller, port,
-                          "Bluetooth L2CAP control epoll error", logger);
+                          "Bluetooth feature reply epoll error", logger);
           epoll_dirty = true;
         }
         continue;

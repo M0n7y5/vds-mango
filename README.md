@@ -8,10 +8,10 @@ Arch Linux.
 >
 > This is a beta. It has been tested on one machine: CachyOS with the
 > `linux-cachyos` kernel, KDE Plasma, PipeWire and one DualSense. A DualSense
-> Edge and several controllers at once are untested. Sharing a controller with
-> the standard Bluetooth support needs a kernel fix that is new; other kernels
-> fall back to a Bluetooth takeover. See
-> [Reporting Issues](#reporting-issues) if something does not work.
+> Edge and several controllers at once are untested. It needs a kernel with a
+> new DualSense fix that so far only CachyOS ships; see
+> [Requirements](#requirements). See [Reporting Issues](#reporting-issues) if
+> something does not work.
 
 It is a virtual USB-to-Bluetooth bridge for DualSense and DualSense Edge
 Wireless Controllers. It supports all USB-based DualSense features over
@@ -55,7 +55,7 @@ Application
   -(ALSA PCM)-> Linux ALSA stack [snd-usb-audio.ko]
   -(USB isochronous OUT URBs)-> Linux USB stack [vhci_hcd.ko]
   -(USB/IP over a local socket)-> vdsd
-  -(hidraw or AF_BLUETOOTH L2CAP socket)-> Linux Bluetooth stack
+  -(hidraw)-> Linux Bluetooth stack
   -(Bluetooth HID Control/Interrupt)-> DualSense (Edge) controller
 ```
 
@@ -72,6 +72,20 @@ In theory, other physical gamepad controllers could be implemented as backends
 and attached, as long as they can provide the DualSense-specific features
 required by games. The infrastructure could also be extended to support physical
 transports other than Bluetooth.
+
+## Requirements
+
+- A kernel whose `hid-playstation` driver ignores the controller's Bluetooth
+  audio reports. `linux-cachyos` has the fix from 7.3.6 and `linux-cachyos-rc`
+  from 7.4-rc4. `linux-cachyos-lts` 6.18 and the mainline kernel, and with it
+  stock Arch, do not have it yet.
+- The kernel's USB/IP host controller `vhci_hcd`, which Arch and CachyOS
+  kernels ship as a module.
+
+`vdsd` tests the driver the first time a controller connects. On a kernel
+without the fix it does not connect the controller, and the app and
+`vdsctl list` show the requirement instead. The controller then stays an
+ordinary Bluetooth gamepad.
 
 ## Quick start
 
@@ -94,20 +108,17 @@ After installing, open **vDS Mango** from the application menu (or run
 2. Press the PS button. Games now see a USB DualSense.
 
 No group membership, logout or audio configuration is needed, and other
-Bluetooth devices keep working. On a kernel that cannot share the controller
-with the standard Bluetooth support, the wizard says so at step 2 and offers
-to take over Bluetooth input instead; see [Bluetooth](#bluetooth).
+Bluetooth devices keep working. On a kernel without the DualSense fix the
+wizard says so at step 2; see [Requirements](#requirements).
 
-Removing the package (`sudo pacman -R vds-mango`) undoes that takeover if it
-was applied, which restarts Bluetooth. Registered controllers in
-`/var/lib/vds` and the log are kept.
+Removing the package (`sudo pacman -R vds-mango`) keeps the registered
+controllers in `/var/lib/vds` and the log.
 
 ## Graphical app
 
 Besides the wizard, `vds-mango` lists the registered controllers with their
 connection state, changes which controller model games see and which virtual
 ports a controller may use, removes controllers, and toggles trace logging.
-Setup > Restore Bluetooth input undoes a Bluetooth takeover.
 
 Edit also sets, per controller, how much audio the controller queues before
 it plays haptics and speaker sound. Smaller values react sooner; too small
@@ -141,19 +152,7 @@ vdsctl attach XX:XX:XX:XX:XX:XX
 `attach` registers the address, it does not connect. Press the PS button on the
 controller; the physical pad initiates the Bluetooth connection.
 
-3. Only if `vdsctl list` then shows "this kernel cannot share the controller"
-   in its ERROR column: hand the Bluetooth HID channels to `vdsd` (see
-   [Bluetooth](#bluetooth)), restart the service and press PS again:
-
-```sh
-sudo /usr/share/vds-mango/override-bluetoothd.sh disable-input --restart
-sudo systemctl restart vdsd
-```
-
-The script prints the effective `bluetooth.service` ExecStart when it is done.
-`enable-input --restart` reverts it.
-
-4. Check the result:
+3. Check the result:
 
 ```sh
 vdsctl list
@@ -161,7 +160,9 @@ vdsctl list
 
 `connected` reports whether the pad is live, `path` names the virtual port
 (`vds0`..`vds3`) once connected, and `error` carries the last connect
-failure. The daemon log is `/var/log/vdsd.log`.
+failure. If it says that this kernel reads the controller's Bluetooth audio as
+button presses, the kernel lacks the fix; see [Requirements](#requirements).
+The daemon log is `/var/log/vdsd.log`.
 
 ## Controller configuration
 
@@ -214,7 +215,6 @@ virtual port.
 - `libudev` (finding the controller's Bluetooth side)
 - `libsystemd` (who is logged in at the computer, sleep announcements)
 - `libdbus-1` (BlueZ device metadata)
-- `libbluetooth` (Bluetooth address and L2CAP helpers)
 - `qt6-base` (graphical app)
 - `polkit` (password prompt of the setup wizard)
 
@@ -227,7 +227,7 @@ virtual port.
 
 ```sh
 sudo pacman -S git base-devel cmake pkgconf
-sudo pacman -S opus systemd dbus bluez-libs qt6-base polkit
+sudo pacman -S opus systemd dbus qt6-base polkit
 ```
 
 `vdsd` needs the kernel's USB/IP host controller, which Arch and CachyOS
@@ -295,29 +295,16 @@ packaging/ArchLinux/build-arch.sh --pkgrel 1 --output-dir dist/ArchLinux
 
 ## Bluetooth
 
-`vdsd` reaches a controller in one of two ways and picks by itself.
+BlueZ connects the controller as usual and `vdsd` drives it through its hidraw
+node. Nothing about Bluetooth is changed, so other Bluetooth devices keep
+working. While a controller is registered, a udev rule keeps its Bluetooth
+side away from other programs, so games and Steam only see the virtual USB
+controller.
 
-**Shared.** BlueZ connects the controller as usual and `vdsd` drives it
-through its hidraw node. Nothing about Bluetooth is changed. While a
-controller is registered, a udev rule keeps its Bluetooth side away from other
-programs, so games and Steam only see the virtual USB controller. This needs a
-kernel whose `hid-playstation` driver ignores the controller's Bluetooth audio
-reports; `vdsd` tests the driver the first time a controller connects.
-
-**Takeover.** On a kernel without that fix the driver reads the controller's
-microphone packets as button presses, so `vdsd` refuses to share and takes the
-two Bluetooth HID channels itself instead.
-
-> [!IMPORTANT]
->
-> A takeover runs `bluetoothd` with its input plugin disabled
-> (`--noplugin=input`). While the plugin is off, classic Bluetooth keyboards,
-> mice and gamepads do not work. Bluetooth audio is not affected. The setup
-> wizard lists the paired devices this affects before it changes anything.
-
-The wizard and `override-bluetoothd.sh` install a `bluetooth.service` drop-in
-and restart Bluetooth. In a source checkout the script is
-`scripts/override-bluetoothd.sh`.
+On a kernel without the fix the `hid-playstation` driver reads the
+controller's microphone packets as button presses. `vdsd` tests the driver the
+first time a controller connects and refuses to connect it there; see
+[Requirements](#requirements).
 
 ## Audio
 
@@ -345,8 +332,7 @@ If the sink shows only two channels, select the card's `pro-audio` profile with
 ## Input Setup
 
 `data/72-vds-dualsense-hide.rules` hides a registered controller's Bluetooth
-side from other programs when `vdsd` shares it with BlueZ (see
-[Bluetooth](#bluetooth)):
+side from other programs (see [Bluetooth](#bluetooth)):
 
 ```sh
 sudo cp data/72-vds-dualsense-hide.rules /etc/udev/rules.d/
