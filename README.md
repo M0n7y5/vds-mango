@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="data/icons/vds-mango.svg" width="128" alt="vDS Mango logo">
+</p>
+
 # vDS Mango
 
 vDS Mango is a Linux-only fork of [vDS](https://github.com/hurryman2212/vds)

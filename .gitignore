@@ -18,6 +18,8 @@
 !/data/*.desktop
 !/data/*.in
 !/data/*.rules
+!/data/icons/
+!/data/icons/*.svg
 
 !/include/
 !/include/**/

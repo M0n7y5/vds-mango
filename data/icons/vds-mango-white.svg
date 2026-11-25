@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="5 -5 400 400">
+  <title>Mango Gamepad (white)</title>
+  <defs>
+    <mask id="cut" maskUnits="userSpaceOnUse" x="0" y="-10" width="420" height="420">
+      <rect x="0" y="-10" width="420" height="420" fill="#FFFFFF"/>
+      <path d="M188 76 C165 66 140 61 120 60" fill="none" stroke="#000000" stroke-width="4" stroke-linecap="round"/>
+      <g fill="#000000">
+        <rect x="134" y="200" width="24" height="68" rx="6"/>
+        <rect x="112" y="222" width="68" height="24" rx="6"/>
+        <circle cx="262" cy="208" r="12"/>
+        <circle cx="262" cy="260" r="12"/>
+        <circle cx="236" cy="234" r="12"/>
+        <circle cx="288" cy="234" r="12"/>
+        <rect x="180" y="292" width="18" height="8" rx="4"/>
+        <rect x="206" y="292" width="18" height="8" rx="4"/>
+      </g>
+    </mask>
+  </defs>
+  <g mask="url(#cut)" fill="#FFFFFF">
+    <path d="M200 98 C199 88 197 80 193 71" fill="none" stroke="#FFFFFF" stroke-width="7" stroke-linecap="round"/>
+    <path d="M195 79 C176 50 136 42 108 56 C128 86 168 94 195 79 Z"/>
+    <path d="M205 95 C280 85 340 150 335 235 C330 315 265 350 200 345 C120 340 65 285 75 215 C82 160 120 150 150 130 C170 115 180 98 205 95 Z"/>
+  </g>
+</svg>

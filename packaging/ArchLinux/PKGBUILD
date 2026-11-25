@@ -9,7 +9,7 @@ arch=('x86_64')
 url="https://github.com/M0n7y5/vds-mango"
 license=('MIT')
 depends=('bluez' 'dbus' 'gcc-libs' 'glibc' 'kmod' 'opus' 'polkit' 'qt6-base'
-         'systemd-libs')
+         'qt6-svg' 'systemd-libs')
 makedepends=('cmake' 'git' 'pkgconf')
 optdepends=('pipewire: controller haptics, speaker and microphone'
             'wireplumber: names and priorities of the controller audio devices'

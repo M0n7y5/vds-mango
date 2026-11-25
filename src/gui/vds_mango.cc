@@ -24,7 +24,8 @@ int main(int argc, char **argv) {
     QApplication::setApplicationName("vds-mango");
     QApplication::setApplicationVersion(vds::kVersion);
     QApplication::setDesktopFileName("vds-mango");
-    QApplication::setWindowIcon(QIcon::fromTheme("input-gaming"));
+    QApplication::setWindowIcon(
+        QIcon::fromTheme("vds-mango", QIcon(":/icons/vds-mango.svg")));
     // Plasma's native message dialog ignores the default button, so Return
     // would confirm removing a controller instead of cancelling.
     QApplication::setAttribute(Qt::AA_DontUseNativeDialogs);
