@@ -375,7 +375,7 @@ void MainWindow::update_health() {
                         : !kernel_problem.isEmpty() ? kernel_problem
                                                     : bluetooth_problem_;
   banner_text_->setText(text);
-  // Setup can start the service; it cannot change the kernel or Bluetooth.
+  // Setup can start the service. It cannot change the kernel or Bluetooth.
   banner_setup_->setVisible(!service_ok);
   banner_->setVisible(!text.isEmpty());
 }

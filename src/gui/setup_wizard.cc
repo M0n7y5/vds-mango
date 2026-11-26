@@ -148,7 +148,7 @@ public:
       : client_(client), bluez_(bluez), added_address_(added_address) {
     setTitle("Add your controller");
     setSubTitle("DualSense: hold Create and PS together until the light bar "
-                "blinks rapidly; paired ones are listed too. Steam "
+                "blinks rapidly. Paired ones are listed too. Steam "
                 "Controller: plug in its Puck and switch the controller on.");
     setButtonText(QWizard::NextButton, "Add controller");
 
@@ -350,7 +350,7 @@ private:
   QLabel *claim_hint_ = nullptr;
   QPushButton *claim_ = nullptr;
   std::vector<Candidate> candidates_;
-  /// The user asked to take the Pucks from other programs; every refresh
+  /// The user asked to take the Pucks from other programs. Every refresh
   /// renews that until the page is left.
   bool claiming_ = false;
   bool busy_ = false;
@@ -416,7 +416,7 @@ private:
     explanation_->clear();
     if (controller.connected) {
       row_->show_state(
-          true, steam() ? "Connected. Games now see a USB DualSense; its "
+          true, steam() ? "Connected. Games now see a USB DualSense. Its "
                           "haptics and rumble play on the Steam Controller."
                         : "Connected. Games now see a USB DualSense with "
                           "haptics, adaptive triggers and audio.");

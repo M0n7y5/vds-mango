@@ -877,7 +877,7 @@ void UsbipPort::disconnect() {
     try {
       write_vhci("detach", std::to_string(*vhci_port_));
     } catch (const std::exception &) {
-      // vhci_hcd has already dropped the device; closing the socket below
+      // vhci_hcd has already dropped the device. Closing the socket below
       // covers every other case.
     }
     device_.reset();

@@ -14,9 +14,9 @@ namespace vds::gui {
 
 /// Draws a Lottie animation with QPainter. Qt's own player is QML only and
 /// no other one is packaged for Arch, so this knows the part of the format
-/// the startup animation is made of: null and shape layers with parents and
-/// static masks; groups of rectangles, ellipses and static paths with fills,
-/// strokes and a trim; keyframes with cubic easing.
+/// the startup animation is made of. Layers: null and shape layers with
+/// parents and static masks. Shapes: groups of rectangles, ellipses and
+/// static paths with fills, strokes and a trim. Keyframes: cubic easing.
 class LottieAnimation {
 public:
   /// Throws std::runtime_error when the animation uses anything else, so a

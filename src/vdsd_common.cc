@@ -440,7 +440,7 @@ std::string handle_attach_control_request(
         find_controller_target_by_address(targets, config.address);
     if (target == nullptr) {
       const std::string error =
-          "address is not paired, not supported, or not attachable; run "
+          "address is not paired, not supported, or not attachable. Run "
           "vdsctl list-targets";
       logger.log(vds::LogScope::Control, LogLevel::Warn,
                  "attach rejected " + error);
@@ -625,10 +625,10 @@ std::string handle_buzz_control_request(
         [&](const auto &candidate) { return candidate.address == address; });
     if (controller == controllers.end() || !controller->connected) {
       throw std::runtime_error(
-          "the controller is not connected; press the PS button first");
+          "the controller is not connected. Press the PS button first");
     }
     if (controller->audio_busy) {
-      throw std::runtime_error("the controller's audio is in use; close the "
+      throw std::runtime_error("the controller's audio is in use. Close the "
                                "game or app playing through it first");
     }
   } catch (const std::exception &error) {

@@ -22,7 +22,7 @@ inline constexpr std::uint8_t kDefaultAudioBufferLength = 64;
 /// Bluetooth audio reports as input. The GUI compares against it to show the
 /// requirement where the controller would connect.
 inline constexpr std::string_view kBluetoothSharingUnsupported =
-    "this kernel reads the controller's Bluetooth audio as button presses; "
+    "this kernel reads the controller's Bluetooth audio as button presses. "
     "vDS Mango needs a kernel with the DualSense audio fix, such as "
     "linux-cachyos 7.3.6 or newer";
 /// Registers a Steam Controller by its serial number: steam:FXA1234567B89.
@@ -44,7 +44,7 @@ enum class PadClick {
 /// How a Steam Controller plays what a game sends to a DualSense.
 struct SteamTuning {
   /// Percent of the game's haptics signal. For the same signal the grips
-  /// shake harder than a DualSense's; at 80 a player found Ratchet & Clank
+  /// shake harder than a DualSense's. At 80 a player found Ratchet & Clank
   /// to feel right.
   std::uint8_t haptics_strength = 80;
   /// Percent of the game's rumble motor values.
@@ -86,7 +86,7 @@ std::string controller_profile_name(ControllerProfile profile);
 std::uint8_t parse_audio_buffer_length(std::string_view text);
 PadClick parse_pad_click(std::string_view text);
 std::string pad_click_name(PadClick click);
-/// The tuning keys among fields replace the values of tuning; an absent key
+/// The tuning keys among fields replace the values of tuning. An absent key
 /// keeps its value.
 SteamTuning read_steam_tuning(std::span<const JsonlField> fields,
                               std::string_view context, SteamTuning tuning);
@@ -95,7 +95,7 @@ SteamTuning read_steam_tuning(std::span<const JsonlField> fields,
 std::string steam_tuning_fields(const SteamTuning &tuning, bool only_changed);
 std::vector<unsigned> parse_ports(std::string_view text);
 std::string format_ports(std::span<const unsigned> ports);
-/// Virtual ports have no device node; this name identifies one to users.
+/// Virtual ports have no device node. This name identifies one to users.
 std::string port_name_for_index(unsigned port);
 std::optional<unsigned> port_index_from_name(std::string_view name);
 bool controller_config_allows_port(const ControllerConfig &config,

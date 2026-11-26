@@ -214,7 +214,7 @@ void test_unpaired_address_surfaces_the_daemon_error_text() {
                           (void)vds::gui::parse_attach_reply(reply);
                         }),
                std::string("address is not paired, not supported, or not "
-                           "attachable; run vdsctl list-targets"));
+                           "attachable. Run vdsctl list-targets"));
 }
 
 void test_steam_controller_is_registered_while_bluetoothd_is_down() {
@@ -491,7 +491,7 @@ void test_buzz_for_a_controller_that_is_off_surfaces_the_daemon_error_text() {
   VDS_CHECK_EQ(
       error_of(daemon, vds::gui::buzz_request("aa:bb:cc:dd:ee:01"),
                vds::gui::parse_buzz_reply),
-      std::string("the controller is not connected; press the PS button "
+      std::string("the controller is not connected. Press the PS button "
                   "first"));
 }
 

@@ -23,7 +23,7 @@ namespace vds {
 namespace {
 
 constexpr std::size_t kBtReadBufferSize = 1024;
-// hidraw carries bare reports; the parsers expect the HIDP header in front.
+// hidraw carries bare reports. The parsers expect the HIDP header in front.
 constexpr std::uint8_t kHidpInputHeader = 0xa1;
 constexpr std::uint8_t kHidpFeatureHeader = 0xa3;
 
@@ -89,7 +89,7 @@ bool BtBackend::try_send_feature_set(std::span<const std::uint8_t> report) {
   if (packet.empty()) {
     return true;
   }
-  // Drop the HIDP header byte; hidraw wants the report itself.
+  // Drop the HIDP header byte. hidraw wants the report itself.
   if (::ioctl(hidraw_fd_.get(), HIDIOCSFEATURE(packet.size() - 1),
               packet.data() + 1) < 0) {
     throw BluetoothLinkError("Bluetooth hidraw feature set failed: " +

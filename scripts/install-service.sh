@@ -54,7 +54,7 @@ while [ "$#" -gt 0 ]; do
 done
 
 if ! is_systemd_running; then
-	echo "systemd is not running as the system manager; skipping ${service_name}" >&2
+	echo "systemd is not running as the system manager, skipping ${service_name}" >&2
 	exit 0
 fi
 

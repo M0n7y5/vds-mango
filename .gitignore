@@ -23,6 +23,10 @@
 !/data/animations/
 !/data/animations/*.json
 
+!/docs/
+!/docs/*.png
+!/docs/*.svg
+
 !/include/
 !/include/**/
 !/include/**/*.h

@@ -23,11 +23,11 @@ constexpr std::string_view kControlReplyContext = "control reply";
 constexpr std::string_view kListContext = "list reply";
 constexpr std::string_view kTargetsContext = "list-targets reply";
 constexpr std::string_view kNoControllersHint =
-    "(no controllers registered; run: vdsctl list-targets)";
+    "(no controllers registered. Run: vdsctl list-targets)";
 constexpr std::string_view kNoTargetsHint =
-    "(no attachable controllers; pair one with bluetoothctl)";
+    "(no attachable controllers. Pair one with bluetoothctl)";
 constexpr std::string_view kOfflineHint =
-    "note: controller is not connected; press the PS button to connect\n";
+    "note: controller is not connected. Press the PS button to connect\n";
 
 std::string attach_request(const ControllerConfig &config) {
   std::string request = "{";
@@ -95,7 +95,7 @@ accept_control_reply(const std::string &reply) {
 }
 
 std::string untrusted_hint(std::string_view address) {
-  std::string hint = "note: controller is not trusted in BlueZ; run 'trust ";
+  std::string hint = "note: controller is not trusted in BlueZ. Run 'trust ";
   hint += address;
   hint += "' in bluetoothctl or it will not reconnect\n";
   return hint;
@@ -261,7 +261,7 @@ std::string vdsctl_usage(std::string_view version,
           "address:\n"
           "  a Bluetooth address, or steam:<serial> for a Steam Controller "
           "on its\n"
-          "  Puck; vdsctl list-targets shows both\n"
+          "  Puck. vdsctl list-targets shows both\n"
           "\n"
           "trace scopes:\n"
           "  all, input, input-audio, input-control, output\n"

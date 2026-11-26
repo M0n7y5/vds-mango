@@ -12,8 +12,7 @@
 namespace vds::test {
 
 void test_duplicate_keys_keep_both_fields() {
-  // Duplicate keys are silently accepted. A later reject-duplicates change
-  // must be deliberate; require_jsonl_string keeps the first address.
+  // The parser itself keeps duplicate keys. The field lookups refuse them.
   constexpr std::string_view kLine =
       "{\"address\":\"aa:bb:cc:dd:ee:01\","
       "\"address\":\"aa:bb:cc:dd:ee:02\","

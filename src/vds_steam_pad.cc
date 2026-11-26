@@ -32,9 +32,9 @@ constexpr std::uint8_t kStreamStatusReportId = 0x44;
 constexpr std::uint8_t kStreamOverrun = 0x01;
 constexpr std::uint8_t kStreamStopped = 0x02;
 constexpr std::uint8_t kStreamRejected = 0x10;
-/* SDL refreshes the settings this often; the controller drops them. */
+/* SDL refreshes the settings this often. The controller drops them. */
 constexpr auto kSettingsInterval = std::chrono::seconds(3);
-/* Rumble stops by itself unless repeated; SDL repeats it this often. */
+/* Rumble stops by itself unless repeated. SDL repeats it this often. */
 constexpr auto kRumbleInterval = std::chrono::milliseconds(40);
 /* An idle stream costs 129 radio packets per second. */
 constexpr auto kStreamIdleTimeout = std::chrono::seconds(2);

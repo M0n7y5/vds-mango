@@ -36,7 +36,7 @@ constexpr std::uint32_t kButtonB = 0x00000002;
 constexpr std::uint32_t kButtonX = 0x00000004;
 constexpr std::uint32_t kButtonY = 0x00000008;
 constexpr std::uint32_t kButtonRightStick = 0x00000020;
-/* SDL calls this bit View and 0x4000 Menu; on the controller it is the
+/* SDL calls this bit View and 0x4000 Menu. On the controller it is the
  * other way round: the left button, View, sets 0x4000. */
 constexpr std::uint32_t kButtonMenu = 0x00000040;
 constexpr std::uint32_t kButtonRightBumper = 0x00000200;
@@ -331,7 +331,7 @@ std::vector<std::vector<std::uint8_t>>
 steam_virtual_feature_reports(std::string_view serial) {
   std::vector<std::uint8_t> calibration(kDsCalibrationReportSize, 0);
   calibration[0] = kDsCalibrationReportId;
-  /* Three gyro biases stay zero; then plus and minus for pitch, yaw, roll. */
+  /* Three gyro biases stay zero, then plus and minus for pitch, yaw, roll. */
   for (std::size_t axis = 0; axis < 3; ++axis) {
     put_le16(calibration, 7 + 4 * axis, kDsGyroCalibrationCounts);
     put_le16(calibration, 9 + 4 * axis, -kDsGyroCalibrationCounts);
@@ -346,7 +346,7 @@ steam_virtual_feature_reports(std::string_view serial) {
   const auto address = address_for(serial);
   std::copy(address.begin(), address.end(),
             pairing.begin() + kDsPairingAddressOffset);
-  /* Two DualSenses had 08 25 00 here; the host address after it is empty. */
+  /* Two DualSenses had 08 25 00 here. The host address after it is empty. */
   pairing[kDsPairingAddressOffset + kDsAddressSize] = 0x08;
   pairing[kDsPairingAddressOffset + kDsAddressSize + 1] = 0x25;
 
@@ -422,7 +422,7 @@ steam_pad_click_report(std::size_t pad, bool pressed, PadClick click) {
   if (click == PadClick::Off) {
     return std::nullopt;
   }
-  /* Side 0 is the left trackpad, 1 the right; the last byte is a gain. */
+  /* Side 0 is the left trackpad, 1 the right. The last byte is a gain. */
   if (click == PadClick::Soft) {
     return SteamClickReport{kClickReportId, static_cast<std::uint8_t>(pad),
                             kClick,

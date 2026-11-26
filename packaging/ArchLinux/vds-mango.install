@@ -45,8 +45,8 @@ _warn_legacy_config_db() {
 
 	[ -f "$db_path" ] || return 0
 	grep -qv '"profile"' "$db_path" || return 0
-	message="vds-mango: $db_path predates 0.3.0 and cannot be read;"
-	message="$message delete it and re-register controllers with vdsctl attach"
+	message="vds-mango: $db_path predates 0.3.0 and cannot be read."
+	message="$message Delete it and re-register controllers with vdsctl attach"
 	echo "$message" >&2
 }
 

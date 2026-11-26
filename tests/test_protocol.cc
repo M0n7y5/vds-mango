@@ -16,7 +16,7 @@ void test_feature_set_packet_keeps_payload_tail() {
   // L11c: asserts the USB tail survives feature_set_packet. UNVERIFIED
   // contract: current code writes the DualSense BT CRC over the tail,
   // matching the pad's GET framing. Keep WILL_FAIL until settled on
-  // hardware; do not "fix" the code to satisfy this test without pad
+  // hardware. Do not "fix" the code to satisfy this test without pad
   // evidence.
   const std::array<std::uint8_t, 41> report = {
       0x05, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a,

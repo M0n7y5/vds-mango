@@ -89,7 +89,7 @@ constexpr auto kOutputTraceSlowWarn = std::chrono::milliseconds(5);
 constexpr auto kOutputTraceFeatureSlowWarn = std::chrono::milliseconds(20);
 /*
  * 0x36 carries both a haptics block and a 10 ms Opus speaker block. Pace the
- * combined packet at the speaker frame interval; using the 64-byte haptics
+ * combined packet at the speaker frame interval. Using the 64-byte haptics
  * duration here lets speaker audio drift into periodic underruns after a few
  * seconds.
  */
@@ -204,11 +204,6 @@ using vds::kTraceOutput;
 using vds::trace_enabled;
 using vds::trim_command;
 
-/*
- * A feature GET or SET that cannot be written immediately. Queued rather than
- * written with a blocking poll, because the single-threaded loop cannot afford
- * to wait on one pad's congested control channel.
- */
 struct PendingControlWrite {
   std::uint8_t report_id = 0;
   bool is_set = false;
@@ -510,7 +505,7 @@ int open_control_socket(const std::string &path) {
     throw std::runtime_error("failed to bind control socket " + path + ": " +
                              std::strerror(error));
   }
-  // Any local process may connect; control_peer_allowed decides who is served.
+  // Any local process may connect. control_peer_allowed decides who is served.
   (void)::chmod(path.c_str(), 0666);
 
   if (::listen(fd.get(), 4) < 0) {
@@ -1231,7 +1226,7 @@ void handle_steam_frame(const vds_frame_header &header,
     logger.log(vds::LogScope::Hid, vds::LogLevel::Warn,
                port.path + " host asked for feature report " +
                    hex_u8(report_id) +
-                   ", which a Steam Controller has no answer to; replied "
+                   ", which a Steam Controller has no answer to. Replied "
                    "with zeros");
     cache_feature_report(port, blank, false, logger);
   } else if (header.type == VDS_FRAME_USB_AUDIO_OUT) {
@@ -1550,8 +1545,8 @@ void initialize_bt_controller(vds::BtBackend &bt_backend,
         throw std::runtime_error("timed out waiting for initial Bluetooth "
                                  "feature report " +
                                  hex_u8(report_id) +
-                                 "; the controller dropped during setup, "
-                                 "press the PS button to retry");
+                                 ". The controller dropped during setup. "
+                                 "Press the PS button to retry");
       }
       if ((pfd.revents & (POLLERR | POLLHUP | POLLNVAL)) != 0) {
         throw std::runtime_error("Bluetooth control channel closed during "
@@ -1748,7 +1743,7 @@ void sync_hidden_pad_markers(std::span<const ControllerRuntime> controllers,
         !std::ofstream(marker).good()) {
       logger.log(vds::LogScope::Bluetooth, vds::LogLevel::Warn,
                  "cannot create " + marker.string() +
-                     "; a registered controller stays visible to other "
+                     ". A registered controller stays visible to other "
                      "programs");
     }
   }
@@ -1884,7 +1879,7 @@ kernel_misreads_bluetooth_audio(vds::BtBackend &bt_backend, VirtualPort &port,
     }
   }
 
-  /* Stop the microphone stream again; nothing has asked for audio yet. */
+  /* Stop the microphone stream again, since nothing has asked for audio yet. */
   (void)bt_backend.try_send_output_report(
       port.output_state.build_bt_mic_report(false));
   (void)bt_backend.try_send_output_report(
@@ -1972,7 +1967,7 @@ void attach_bluez_pads(std::vector<VirtualPort> &ports,
       if (controller.bluez_kicked) {
         constexpr std::string_view kNotHidden =
             "the controller reconnected without being hidden from other "
-            "programs; is 72-vds-dualsense-hide.rules installed?";
+            "programs. Is 72-vds-dualsense-hide.rules installed?";
         if (controller.last_error != kNotHidden) {
           logger.log(vds::LogScope::Bluetooth, vds::LogLevel::Error,
                      "address=" + controller.config.address + " " +
@@ -2074,7 +2069,7 @@ void attach_steam_pads(std::vector<VirtualPort> &ports,
     }
     if (!pad->hidden) {
       constexpr std::string_view kNotHidden =
-          "the Steam Controller is not hidden from other programs; is "
+          "the Steam Controller is not hidden from other programs. Is "
           "72-vds-dualsense-hide.rules installed?";
       if (controller.last_error != kNotHidden) {
         logger.log(vds::LogScope::Hid, vds::LogLevel::Error,
@@ -2438,7 +2433,6 @@ void flush_pending_outputs(std::vector<VirtualPort> &ports,
 
     try {
       auto &port = ports[*port_index];
-      /* Control uses PSM 0x0011; the drains below share PSM 0x0013. */
       (void)flush_pending_control_writes(port, *controller.backend);
       if (!flush_pending_bt_state_report(port, *controller.backend, trace_flags,
                                          logger)) {
@@ -2681,7 +2675,7 @@ void handle_control_client(int control_fd, std::span<VirtualPort> ports,
       if (request.size() + static_cast<std::size_t>(got) >
           kControlRequestMaxBytes) {
         logger.log(vds::LogScope::Control, vds::LogLevel::Warn,
-                   "control request too long; dropping client");
+                   "control request too long, dropping client");
         return;
       }
       request.append(buffer.data(), static_cast<std::size_t>(got));
@@ -2703,7 +2697,7 @@ void handle_control_client(int control_fd, std::span<VirtualPort> ports,
     const auto now = Clock::now();
     if (now >= deadline) {
       logger.log(vds::LogScope::Control, vds::LogLevel::Warn,
-                 "control request timed out; dropping client");
+                 "control request timed out, dropping client");
       return;
     }
     pollfd pfd{.fd = client_fd.get(), .events = POLLIN, .revents = 0};
@@ -2723,7 +2717,7 @@ void handle_control_client(int control_fd, std::span<VirtualPort> ports,
     }
     if (ready == 0) {
       logger.log(vds::LogScope::Control, vds::LogLevel::Warn,
-                 "control request timed out; dropping client");
+                 "control request timed out, dropping client");
       return;
     }
   }
@@ -2938,8 +2932,8 @@ void unplug_for_sleep(std::vector<VirtualPort> &ports,
   })) {
     if (Clock::now() >= deadline) {
       logger.log(vds::LogScope::Usb, vds::LogLevel::Warn,
-                 "a virtual controller is still plugged in; the system may "
-                 "refuse to sleep");
+                 "a virtual controller is still plugged in, so the system "
+                 "may refuse to sleep");
       return;
     }
     std::this_thread::sleep_for(kSleepUnplugPoll);
@@ -3062,7 +3056,7 @@ int run_daemon(const Options &options, vds::Logger &logger) {
         if (first_reload) {
           throw std::runtime_error(
               "failed to load " + options.db_path + ": " + error.what() +
-              "; if this database predates 0.3.0, delete it and re-register "
+              ". If this database predates 0.3.0, delete it and re-register "
               "controllers with vdsctl attach");
         }
         logger.log(vds::LogScope::Config, vds::LogLevel::Error,
@@ -3248,7 +3242,7 @@ int run_daemon(const Options &options, vds::Logger &logger) {
               break;
             } catch (const PortIoError &error) {
               logger.log(vds::LogScope::Port, vds::LogLevel::Error,
-                         std::string(error.what()) + "; reloading ports");
+                         std::string(error.what()) + ", reloading ports");
               reload_requested = true;
               epoll_dirty = true;
               break;
@@ -3257,7 +3251,7 @@ int run_daemon(const Options &options, vds::Logger &logger) {
         }
         if ((revents & (EPOLLERR | EPOLLHUP)) != 0) {
           logger.log(vds::LogScope::Port, vds::LogLevel::Error,
-                     port.path + " epoll error; reloading ports");
+                     port.path + " epoll error, reloading ports");
           reload_requested = true;
           epoll_dirty = true;
         }
@@ -3291,7 +3285,7 @@ int run_daemon(const Options &options, vds::Logger &logger) {
           epoll_dirty = true;
         } catch (const PortIoError &error) {
           logger.log(vds::LogScope::Port, vds::LogLevel::Error,
-                     std::string(error.what()) + "; reloading ports");
+                     std::string(error.what()) + ", reloading ports");
           reload_requested = true;
           epoll_dirty = true;
         }
@@ -3326,7 +3320,7 @@ int run_daemon(const Options &options, vds::Logger &logger) {
               break;
             } catch (const PortIoError &error) {
               logger.log(vds::LogScope::Port, vds::LogLevel::Error,
-                         std::string(error.what()) + "; reloading ports");
+                         std::string(error.what()) + ", reloading ports");
               reload_requested = true;
               epoll_dirty = true;
               break;
@@ -3355,7 +3349,7 @@ int run_daemon(const Options &options, vds::Logger &logger) {
               break;
             } catch (const PortIoError &error) {
               logger.log(vds::LogScope::Port, vds::LogLevel::Error,
-                         std::string(error.what()) + "; reloading ports");
+                         std::string(error.what()) + ", reloading ports");
               reload_requested = true;
               epoll_dirty = true;
               break;

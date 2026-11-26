@@ -14,7 +14,7 @@ namespace vds::gui {
 /// and registers a controller, then waits for it to connect.
 class SetupWizard : public QWizard {
 public:
-  /// prepare_needed starts at the page that starts the service; otherwise
+  /// prepare_needed starts at the page that starts the service. Otherwise
   /// the wizard starts at picking a controller.
   SetupWizard(const QString &socket_path, bool prepare_needed,
               QWidget *parent);

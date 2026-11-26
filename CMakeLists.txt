@@ -134,7 +134,7 @@ if(BUILD_TESTS)
            WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
   # L11c: asserts the USB tail survives feature_set_packet. UNVERIFIED
   # contract: current code writes the DualSense BT CRC over the tail, matching
-  # the pad's GET framing. Keep WILL_FAIL until settled on hardware; do not
+  # the pad's GET framing. Keep WILL_FAIL until settled on hardware. Do not
   # "fix" the code to satisfy this test without pad evidence.
   set_tests_properties(protocol_feature_set PROPERTIES WILL_FAIL TRUE)
 

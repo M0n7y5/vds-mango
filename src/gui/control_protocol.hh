@@ -26,7 +26,7 @@ struct ControllerStatus {
   bool headset = false;
   bool mic_muted = false;
   /// Both empty while the controller is off. firmware is the version Sony's
-  /// updater shows, such as 0630; firmware_build is the internal build, such
+  /// updater shows, such as 0630. firmware_build is the internal build, such
   /// as 1.16.42.
   QString firmware;
   QString firmware_build;

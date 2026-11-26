@@ -14,13 +14,13 @@ namespace vds::test {
 
 void test_empty_list_reply_names_the_next_command() {
   VDS_CHECK_EQ(vds::format_vdsctl_list_table(""),
-               std::string("(no controllers registered; run: vdsctl "
+               std::string("(no controllers registered. Run: vdsctl "
                            "list-targets)\n"));
 }
 
 void test_empty_targets_reply_names_the_pairing_tool() {
   VDS_CHECK_EQ(vds::format_vdsctl_targets_table(""),
-               std::string("(no attachable controllers; pair one with "
+               std::string("(no attachable controllers. Pair one with "
                            "bluetoothctl)\n"));
 }
 
