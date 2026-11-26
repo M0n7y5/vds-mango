@@ -448,6 +448,35 @@ void test_firmware_build_is_listed_as_three_decimal_parts() {
       std::string("1.16.42"));
 }
 
+vds::gui::ControllerStatus listed_with_steam_firmware(std::uint32_t time) {
+  Daemon daemon;
+  (void)daemon.handle(vds::gui::attach_request({
+      .address = "steam:FXA1234567B89",
+      .profile = vds::ControllerProfile::Unspecified,
+      .ports = {},
+  }));
+  daemon.connect({
+      .address = "steam:FXA1234567B89",
+      .connected = true,
+      .path = "vds0",
+      .error = "",
+      .steam_firmware = time,
+  });
+  return vds::gui::parse_list_reply(daemon.handle(vds::gui::list_request()))
+      .at(0);
+}
+
+void test_steam_firmware_is_listed_as_its_build_date() {
+  VDS_CHECK_EQ(listed_with_steam_firmware(1794503227).firmware.toStdString(),
+               std::string("2026-11-12"));
+}
+
+void test_steam_firmware_build_is_listed_as_valves_file_name_hex() {
+  VDS_CHECK_EQ(
+      listed_with_steam_firmware(1794503227).firmware_build.toStdString(),
+      std::string("6AF5F23B"));
+}
+
 void test_status_reports_the_daemon_version() {
   Daemon daemon;
   VDS_CHECK_EQ(
@@ -532,6 +561,8 @@ void run_tests() {
   test_controller_that_is_off_lists_no_battery_level();
   test_firmware_keeps_the_leading_zero_sony_prints();
   test_firmware_build_is_listed_as_three_decimal_parts();
+  test_steam_firmware_is_listed_as_its_build_date();
+  test_steam_firmware_build_is_listed_as_valves_file_name_hex();
   test_status_reports_the_daemon_version();
   test_status_before_any_connect_leaves_the_kernel_fix_unknown();
   test_status_reports_a_kernel_without_the_fix();

@@ -44,6 +44,9 @@ struct VdsdControlControllerStatus {
   std::optional<std::uint16_t> firmware = std::nullopt;
   /// The internal build, 0xAABBCCCC for AA.BB.CCCC.
   std::optional<std::uint32_t> firmware_build = std::nullopt;
+  /// A Steam Controller's firmware build time in Unix seconds, listed as the
+  /// build date and as the hex time that names Valve's firmware files.
+  std::optional<std::uint32_t> steam_firmware = std::nullopt;
   /// A game or app is playing through the controller's sound card.
   bool audio_busy = false;
 };

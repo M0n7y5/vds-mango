@@ -123,6 +123,11 @@ constexpr std::uint8_t kSetSettingsValues = 0x87;
 constexpr std::uint8_t kSettingLizardMode = 9;
 constexpr std::uint8_t kSettingImuMode = 48;
 constexpr std::uint8_t kImuRawAccelAndGyro = 0x18;
+constexpr std::uint8_t kGetAttributesValues = 0x83;
+constexpr std::size_t kAttributesHeaderSize = 3;
+constexpr std::size_t kAttributeSize = 5;
+/* ATTRIB_FIRMWARE_BUILD_TIME in hid-steam and SDL. */
+constexpr std::uint8_t kAttributeFirmwareBuildTime = 4;
 
 constexpr unsigned kDecimation = VDS_AUDIO_SAMPLE_RATE / kSteamStreamSampleRate;
 static_assert(VDS_AUDIO_SAMPLE_RATE % kSteamStreamSampleRate == 0);
@@ -409,6 +414,30 @@ SteamSettingsReport steam_settings_report() {
       kSettingImuMode,    kImuRawAccelAndGyro, 0};
   std::copy(settings.begin(), settings.end(), report.begin());
   return report;
+}
+
+SteamAttributesRequest steam_attributes_request() {
+  /* Report 1 reaches the controller behind the dongle, 2 the dongle. */
+  return {kFeatureReportId, kGetAttributesValues, 0};
+}
+
+std::optional<std::uint32_t>
+steam_firmware_build_time(std::span<const std::uint8_t> reply) {
+  if (reply.size() < kAttributesHeaderSize || reply[0] != kFeatureReportId ||
+      reply[1] != kGetAttributesValues) {
+    return std::nullopt;
+  }
+  const std::size_t end = kAttributesHeaderSize + reply[2];
+  if (reply.size() < end) {
+    return std::nullopt;
+  }
+  for (std::size_t offset = kAttributesHeaderSize;
+       offset + kAttributeSize <= end; offset += kAttributeSize) {
+    if (reply[offset] == kAttributeFirmwareBuildTime) {
+      return le32(reply, offset + 1);
+    }
+  }
+  return std::nullopt;
 }
 
 SteamStreamConfig steam_stream_config_report(bool enable) {

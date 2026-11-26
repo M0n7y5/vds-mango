@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Jihong Min <hurryman2212@gmail.com>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <ostream>
 #include <stdexcept>
@@ -245,18 +246,30 @@ std::string format_control_list_reply(
     reply += ',';
     reply += jsonl_bool_field("mic_muted", status && status->mic_muted);
     char firmware[16] = "";
+    char firmware_build[16] = "";
     if (status && status->firmware) {
       std::snprintf(firmware, sizeof(firmware), "%04x",
                     static_cast<unsigned>(*status->firmware));
     }
-    reply += ',';
-    reply += jsonl_string_field("firmware", firmware);
-    char firmware_build[16] = "";
     if (status && status->firmware_build) {
       const std::uint32_t build = *status->firmware_build;
       std::snprintf(firmware_build, sizeof(firmware_build), "%u.%u.%u",
                     build >> 24, (build >> 16) & 0xff, build & 0xffff);
     }
+    if (status && status->steam_firmware) {
+      /* Steam shows a Valve controller's firmware as its build date. */
+      const std::chrono::year_month_day date(
+          std::chrono::floor<std::chrono::days>(std::chrono::sys_seconds(
+              std::chrono::seconds(*status->steam_firmware))));
+      std::snprintf(firmware, sizeof(firmware), "%04d-%02u-%02u",
+                    static_cast<int>(date.year()),
+                    static_cast<unsigned>(date.month()),
+                    static_cast<unsigned>(date.day()));
+      std::snprintf(firmware_build, sizeof(firmware_build), "%08X",
+                    static_cast<unsigned>(*status->steam_firmware));
+    }
+    reply += ',';
+    reply += jsonl_string_field("firmware", firmware);
     reply += ',';
     reply += jsonl_string_field("firmware_build", firmware_build);
     reply += "}\n";

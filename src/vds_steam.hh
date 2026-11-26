@@ -26,6 +26,7 @@ using SteamStreamPacket = std::array<std::uint8_t, 64>;
 using SteamStreamConfig = std::array<std::uint8_t, 4>;
 using SteamRumbleReport = std::array<std::uint8_t, 10>;
 using SteamSettingsReport = std::array<std::uint8_t, 64>;
+using SteamAttributesRequest = std::array<std::uint8_t, 64>;
 using SteamClickReport = std::array<std::uint8_t, 4>;
 
 /// G.711 mu-law, the sample format of the haptics stream.
@@ -77,6 +78,15 @@ bool steam_rumble_active(const SteamRumbleReport &report);
 /// The feature report that turns the keyboard and mouse emulation off and
 /// the motion sensors on. The controller forgets it without a refresh.
 SteamSettingsReport steam_settings_report();
+
+/// The feature report that asks the controller for its attribute values.
+/// The command byte is fixed: as a feature report 0x86 is a factory reset.
+SteamAttributesRequest steam_attributes_request();
+/// The build time of the controller's firmware in Unix seconds, the value
+/// Steam's updater logs as current_ts. Empty when the reply to
+/// steam_attributes_request() is cut short or answers another command.
+std::optional<std::uint32_t>
+steam_firmware_build_time(std::span<const std::uint8_t> reply);
 
 /// Starts or stops the haptics stream on both grips.
 SteamStreamConfig steam_stream_config_report(bool enable);

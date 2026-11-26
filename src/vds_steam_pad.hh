@@ -86,10 +86,16 @@ public:
   bool streaming() const { return streaming_; }
   /// Counts since the stream last started.
   const StreamStats &stream_stats() const { return stream_stats_; }
+  /// The firmware build time from steam_firmware_build_time(). Empty until
+  /// the controller answered, and for good once it failed to.
+  std::optional<std::uint32_t> firmware_build_time() const {
+    return firmware_build_time_;
+  }
 
 private:
   void write_report(std::span<const std::uint8_t> report);
   void send_settings();
+  void read_firmware();
   void start_stream(Clock::time_point now);
   void stop_stream();
   void note_stream_status(std::span<const std::uint8_t> report);
@@ -100,6 +106,8 @@ private:
   SteamTuning tuning_;
   std::optional<SteamRumbleReport> rumble_;
   StreamStats stream_stats_;
+  std::optional<std::uint32_t> firmware_build_time_;
+  int firmware_reads_left_;
   Clock::time_point next_settings_;
   Clock::time_point next_rumble_;
   Clock::time_point next_packet_;

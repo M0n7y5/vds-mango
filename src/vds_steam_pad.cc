@@ -41,6 +41,15 @@ constexpr auto kStreamIdleTimeout = std::chrono::seconds(2);
 constexpr auto kStreamPeriod = std::chrono::microseconds(
     kSteamStreamFrames * 1'000'000 / kSteamStreamSampleRate);
 constexpr int kMaxLatePackets = 3;
+/*
+ * A reply to another command, such as hid-steam's own serial request,
+ * waits for the next settings refresh to try again. So does EPIPE, which
+ * hid-steam's own feature exchanges retry (steam_send_report_id() and
+ * steam_recv_report_id() in drivers/hid/hid-steam.c). Any other failure
+ * ends the reads: usbhid waits up to 5 s per transfer, so a controller
+ * that does not answer blocks the loop once.
+ */
+constexpr int kFirmwareReads = 3;
 
 std::string read_first_line(const std::filesystem::path &path) {
   std::ifstream file(path);
@@ -142,8 +151,9 @@ unsigned recreate_steam_dongle_nodes(bool hidden) {
 }
 
 SteamBackend::SteamBackend(UniqueFd hidraw_fd, Clock::time_point now)
-    : hidraw_fd_(std::move(hidraw_fd)), next_settings_(now + kSettingsInterval),
-      next_rumble_(now), next_packet_(now), last_signal_(now) {
+    : hidraw_fd_(std::move(hidraw_fd)), firmware_reads_left_(kFirmwareReads),
+      next_settings_(now + kSettingsInterval), next_rumble_(now),
+      next_packet_(now), last_signal_(now) {
   send_settings();
   /* A stream left running by a crashed owner would refuse a new start. */
   write_report(steam_stream_config_report(false));
@@ -188,6 +198,32 @@ void SteamBackend::send_settings() {
     throw SteamLinkError("Steam Controller settings failed: " +
                          std::string(std::strerror(errno)));
   }
+}
+
+void SteamBackend::read_firmware() {
+  if (firmware_build_time_ || firmware_reads_left_ == 0) {
+    return;
+  }
+  --firmware_reads_left_;
+  const SteamAttributesRequest request = steam_attributes_request();
+  SteamAttributesRequest reply{request[0]};
+  if (::ioctl(hidraw_fd_.get(), HIDIOCSFEATURE(request.size()),
+              request.data()) < 0) {
+    if (errno != EPIPE) {
+      firmware_reads_left_ = 0;
+    }
+    return;
+  }
+  const int got =
+      ::ioctl(hidraw_fd_.get(), HIDIOCGFEATURE(reply.size()), reply.data());
+  if (got < 0) {
+    if (errno != EPIPE) {
+      firmware_reads_left_ = 0;
+    }
+    return;
+  }
+  firmware_build_time_ = steam_firmware_build_time(
+      std::span(reply).first(static_cast<std::size_t>(got)));
 }
 
 std::optional<UsbInputReport> SteamBackend::read_input() {
@@ -295,6 +331,7 @@ void SteamBackend::stop_stream() {
 
 SteamBackend::Clock::time_point SteamBackend::service(Clock::time_point now) {
   if (now >= next_settings_) {
+    read_firmware();
     send_settings();
     next_settings_ = now + kSettingsInterval;
   }

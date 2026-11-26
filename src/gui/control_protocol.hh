@@ -25,9 +25,12 @@ struct ControllerStatus {
   bool charging = false;
   bool headset = false;
   bool mic_muted = false;
-  /// Both empty while the controller is off. firmware is the version Sony's
-  /// updater shows, such as 0630. firmware_build is the internal build, such
-  /// as 1.16.42.
+  /// Both empty while the controller is off or has not told its firmware.
+  /// For a DualSense firmware is the version Sony's updater shows, such as
+  /// 0630, and firmware_build the internal build, such as 1.16.42. For a
+  /// Steam Controller firmware is the build date, such as 2026-11-12, and
+  /// firmware_build the build time in hex that names Valve's firmware
+  /// files, such as 6AF5F23B.
   QString firmware;
   QString firmware_build;
   /// How a Steam Controller plays haptics, rumble and trackpad clicks.

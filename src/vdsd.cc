@@ -2776,6 +2776,9 @@ void handle_control_client(int control_fd, std::span<VirtualPort> ports,
                              : std::nullopt,
         .firmware_build =
             firmware ? std::optional(firmware->version) : std::nullopt,
+        .steam_firmware = controller.steam
+                              ? controller.steam->firmware_build_time()
+                              : std::nullopt,
         .audio_busy = port && (port->audio_out_stream_active ||
                                port->speaker_waveout_active),
     });

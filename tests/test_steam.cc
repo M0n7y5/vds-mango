@@ -7,6 +7,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -329,6 +330,41 @@ void test_settings_turn_lizard_mode_off_and_the_motion_sensors_on() {
   VDS_CHECK(std::equal(expected.begin(), expected.end(), report.begin()));
 }
 
+/*
+ * Laid out as hid-steam and SDL read it: report id, command, length, then
+ * a tag and a little-endian value per attribute: unique id (zeroed),
+ * product id, capabilities, bootloader build time, hardware id, firmware
+ * build time. 0x6AF5F23B is the current_ts 1794503227 that Steam's
+ * updater logged for a real controller.
+ */
+std::array<Byte, 64> attribute_reply() {
+  return {0x01, 0x83, 0x1e, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+          0x02, 0x13, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00,
+          0x0a, 0x2e, 0xf9, 0xd2, 0x68, 0x09, 0x4a, 0x00, 0x00,
+          0x00, 0x04, 0x3b, 0xf2, 0xf5, 0x6a};
+}
+
+void test_attributes_request_asks_the_controller_for_all_attributes() {
+  const SteamAttributesRequest expected = {0x01, 0x83, 0x00};
+  VDS_CHECK(steam_attributes_request() == expected);
+}
+
+void test_firmware_build_time_is_read_from_the_attribute_reply() {
+  VDS_CHECK(steam_firmware_build_time(attribute_reply()) ==
+            std::optional<std::uint32_t>(1794503227));
+}
+
+void test_attribute_reply_cut_short_has_no_firmware_build_time() {
+  const auto reply = attribute_reply();
+  VDS_CHECK(!steam_firmware_build_time(std::span(reply).first(30)));
+}
+
+void test_reply_to_another_command_has_no_firmware_build_time() {
+  auto reply = attribute_reply();
+  reply[1] = 0xae;
+  VDS_CHECK(!steam_firmware_build_time(reply));
+}
+
 void test_stream_starts_on_the_grips_at_four_kilohertz_mulaw() {
   const SteamStreamConfig expected = {0x86, 0x02, 0x02, 0x09};
   VDS_CHECK(steam_stream_config_report(true) == expected);
@@ -488,6 +524,10 @@ void run_tests() {
   test_rumble_at_half_strength_halves_the_motor_speeds();
   test_rumble_turned_off_is_not_active();
   test_settings_turn_lizard_mode_off_and_the_motion_sensors_on();
+  test_attributes_request_asks_the_controller_for_all_attributes();
+  test_firmware_build_time_is_read_from_the_attribute_reply();
+  test_attribute_reply_cut_short_has_no_firmware_build_time();
+  test_reply_to_another_command_has_no_firmware_build_time();
   test_stream_starts_on_the_grips_at_four_kilohertz_mulaw();
   test_stream_stop_names_the_grips();
   test_pressing_the_left_pad_plays_a_strong_click_on_it();
