@@ -4,10 +4,13 @@ if(NOT DEFINED VDS_SOURCE_DIR
   message(FATAL_ERROR "missing vDS build info arguments")
 endif()
 
-execute_process(
-  COMMAND "${VDS_SOURCE_DIR}/scripts/generate-version.sh"
-  OUTPUT_VARIABLE VDS_VERSION
-  ERROR_QUIET OUTPUT_STRIP_TRAILING_WHITESPACE)
+# A release tarball has no git history to describe, so its build passes the tag.
+if("${VDS_VERSION}" STREQUAL "")
+  execute_process(
+    COMMAND "${VDS_SOURCE_DIR}/scripts/generate-version.sh"
+    OUTPUT_VARIABLE VDS_VERSION
+    ERROR_QUIET OUTPUT_STRIP_TRAILING_WHITESPACE)
+endif()
 if(VDS_VERSION STREQUAL "")
   set(VDS_VERSION unknown)
 endif()
