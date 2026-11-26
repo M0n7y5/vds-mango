@@ -49,7 +49,12 @@ void ControlClient::send(const QByteArray &request, ReplyHandler on_reply,
 
   connect(socket, &QLocalSocket::connected, socket,
           [socket, request] { socket->write(request); });
-  connect(socket, &QLocalSocket::disconnected, socket,
+  /*
+   * The handlers hang on the client, not on the socket: a socket destroyed
+   * with its client still reports disconnected, and the owner of the
+   * handlers is half destroyed by then.
+   */
+  connect(socket, &QLocalSocket::disconnected, this,
           [socket, finish, on_reply, on_error] {
             const QByteArray reply = socket->readAll();
             finish();
@@ -59,7 +64,7 @@ void ControlClient::send(const QByteArray &request, ReplyHandler on_reply,
               on_error(QString::fromUtf8(error.what()));
             }
           });
-  connect(socket, &QLocalSocket::errorOccurred, socket,
+  connect(socket, &QLocalSocket::errorOccurred, this,
           [socket, finish, on_error,
            path = socket_path_](QLocalSocket::LocalSocketError error) {
             // vdsd closes the connection after its reply, which Qt reports as
@@ -72,7 +77,7 @@ void ControlClient::send(const QByteArray &request, ReplyHandler on_reply,
             finish();
             on_error(message);
           });
-  connect(timer, &QTimer::timeout, socket,
+  connect(timer, &QTimer::timeout, this,
           [finish, on_error, path = socket_path_] {
             finish();
             on_error("vdsd is not responding at " + path);

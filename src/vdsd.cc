@@ -2624,6 +2624,21 @@ bool control_peer_allowed(int client_fd) {
   return std::find(groups.begin(), groups.end(), vds_gid) != groups.end();
 }
 
+/*
+ * Runs before anything is read or logged: every local process can connect,
+ * and waiting for a request would stall the loop for one that is refused.
+ */
+void refuse_control_client(int client_fd) {
+  const std::string reply = vds::format_control_error_reply(
+      "permission denied: controlling vdsd needs root, membership in the "
+      "vds group, or a login on this computer's own screen");
+  (void)::send(client_fd, reply.data(), reply.size(),
+               MSG_DONTWAIT | MSG_NOSIGNAL);
+  /* Closing over an unread request would reset the reply away. */
+  std::array<char, kControlRequestMaxBytes> request{};
+  (void)::recv(client_fd, request.data(), request.size(), MSG_DONTWAIT);
+}
+
 void handle_control_client(int control_fd, std::span<VirtualPort> ports,
                            std::span<ControllerRuntime> controllers,
                            const std::string &db_path,
@@ -2652,6 +2667,10 @@ void handle_control_client(int control_fd, std::span<VirtualPort> ports,
     return;
   }
   accept_failures = 0;
+  if (!control_peer_allowed(client_fd.get())) {
+    refuse_control_client(client_fd.get());
+    return;
+  }
 
   const auto deadline = Clock::now() + kControlClientTimeout;
   std::string request;
@@ -2731,13 +2750,6 @@ void handle_control_client(int control_fd, std::span<VirtualPort> ports,
                  std::string("control reply failed: ") + error.what());
     }
   };
-
-  if (!control_peer_allowed(client_fd.get())) {
-    send_reply(vds::format_control_error_reply(
-        "permission denied: controlling vdsd needs root, membership in the "
-        "vds group, or a login on this computer's own screen"));
-    return;
-  }
 
   std::string reply;
   const std::string command = trim_command(request);
@@ -2935,11 +2947,13 @@ void unplug_for_sleep(std::vector<VirtualPort> &ports,
 }
 
 vds::UniqueFd acquire_single_instance_lock(const char *path) {
-  vds::UniqueFd fd(::open(path, O_RDWR | O_CREAT | O_CLOEXEC, 0644));
+  /* Anyone who can open the file can hold the lock and keep vdsd down. */
+  vds::UniqueFd fd(::open(path, O_RDWR | O_CREAT | O_CLOEXEC, 0600));
   if (!fd) {
     throw std::runtime_error("failed to open lock file " + std::string(path) +
                              ": " + std::strerror(errno));
   }
+  (void)::fchmod(fd.get(), 0600);
   if (::flock(fd.get(), LOCK_EX | LOCK_NB) < 0) {
     if (errno == EWOULDBLOCK) {
       throw std::runtime_error("another vdsd instance already holds " +

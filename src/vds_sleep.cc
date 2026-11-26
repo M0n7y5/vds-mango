@@ -29,10 +29,25 @@ constexpr std::uint64_t kCallTimeoutUs = 2000000;
   throw std::runtime_error(what + ": " + std::strerror(-error));
 }
 
+/*
+ * The match only filters what the bus broadcasts: any client may send this
+ * signal straight to vdsd, and a made-up one would unplug every controller.
+ */
+bool sent_by_root(sd_bus_message *message) {
+  sd_bus_creds *creds = nullptr;
+  uid_t euid{};
+  const bool root =
+      ::sd_bus_query_sender_creds(message, SD_BUS_CREDS_EUID, &creds) >= 0 &&
+      ::sd_bus_creds_get_euid(creds, &euid) >= 0 && euid == 0;
+  ::sd_bus_creds_unref(creds);
+  return root;
+}
+
 int on_prepare_for_sleep(sd_bus_message *message, void *userdata,
                          sd_bus_error *) {
   int sleeping = 0;
-  if (::sd_bus_message_read(message, "b", &sleeping) >= 0) {
+  if (sent_by_root(message) &&
+      ::sd_bus_message_read(message, "b", &sleeping) >= 0) {
     static_cast<std::vector<SleepGuard::Event> *>(userdata)->push_back(
         sleeping ? SleepGuard::Event::Sleeping : SleepGuard::Event::Resumed);
   }

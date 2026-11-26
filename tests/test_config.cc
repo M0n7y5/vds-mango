@@ -4,9 +4,13 @@
 #include "vds_check.hh"
 
 #include <cstddef>
+#include <cstdlib>
 #include <exception>
+#include <filesystem>
 #include <string>
 #include <string_view>
+
+#include <sys/stat.h>
 
 #include "vds_config.hh"
 
@@ -115,6 +119,20 @@ void test_unknown_trackpad_click_in_a_record_is_rejected() {
       "\"pad_click\":\"hard\"}\n"));
 }
 
+void test_database_lock_is_closed_to_other_users() {
+  // flock needs only an open descriptor: a lock others can open lets any
+  // user hold it and keep vdsd from starting.
+  std::string directory =
+      (std::filesystem::temp_directory_path() / "vds-test-XXXXXX").string();
+  VDS_CHECK(::mkdtemp(directory.data()) != nullptr);
+  const std::string db = directory + "/vdsd.db";
+  (void)vds::load_config_db(db);
+  struct stat lock {};
+  VDS_CHECK_EQ(::stat((db + ".lock").c_str(), &lock), 0);
+  VDS_CHECK_EQ(static_cast<unsigned>(lock.st_mode & (S_IRWXG | S_IRWXO)), 0u);
+  std::filesystem::remove_all(directory);
+}
+
 void run_tests() {
   test_one_bad_line_drops_every_controller();
   test_dash_separated_address_normalizes_to_colon_form();
@@ -131,6 +149,7 @@ void run_tests() {
   test_strength_above_one_hundred_in_a_record_is_rejected();
   test_strength_with_a_percent_sign_in_a_record_is_rejected();
   test_unknown_trackpad_click_in_a_record_is_rejected();
+  test_database_lock_is_closed_to_other_users();
 }
 
 } // namespace vds::test

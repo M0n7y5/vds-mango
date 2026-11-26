@@ -174,6 +174,15 @@ if(BUILD_TESTS)
   add_test(NAME lottie COMMAND test_lottie
            WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 
+  add_executable(test_control_client tests/test_control_client.cc
+                                     src/gui/control_client.cc)
+  target_include_directories(test_control_client
+                             PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/gui)
+  target_link_libraries(test_control_client PRIVATE vds_test_support
+                                                    Qt6::Core Qt6::Network)
+  add_test(NAME control_client COMMAND test_control_client
+           WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+
   add_executable(test_steam tests/test_steam.cc)
   target_link_libraries(test_steam PRIVATE vds_test_support vds_steam)
   add_test(NAME steam COMMAND test_steam

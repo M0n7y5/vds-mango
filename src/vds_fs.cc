@@ -23,6 +23,7 @@
 namespace {
 
 constexpr mode_t kVdsFileMode = S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP;
+constexpr mode_t kLockFileMode = S_IRUSR | S_IWUSR;
 constexpr int kDbLockRetryBudgetMs = 100;
 constexpr int kDbLockRetrySleepMs = 5;
 
@@ -61,11 +62,18 @@ void ensure_parent_directory(const std::filesystem::path &path) {
 }
 
 std::unique_ptr<FileLock> lock_file(const std::filesystem::path &path) {
-  const std::filesystem::path directory = db_directory(path);
-  UniqueFd fd(::open(directory.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC));
-  if (!fd) {
-    throw std::runtime_error("failed to open DB directory " +
-                             directory.string() + ": " + std::strerror(errno));
+  /*
+   * flock needs only an open descriptor, so the lock is a file nobody else
+   * can open: on the directory any user could hold it and keep vdsd down.
+   */
+  std::filesystem::path lock = path;
+  lock += ".lock";
+  UniqueFd fd(::open(lock.c_str(),
+                     O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW,
+                     kLockFileMode));
+  if (!fd || ::fchmod(fd.get(), kLockFileMode) < 0) {
+    throw std::runtime_error("failed to open DB lock " + lock.string() +
+                             ": " + std::strerror(errno));
   }
   // Bound the wait so a stuck locker cannot stall the epoll loop.
   int waited_ms = 0;
@@ -79,15 +87,14 @@ std::unique_ptr<FileLock> lock_file(const std::filesystem::path &path) {
       sleep_for.tv_nsec =
           static_cast<long>(kDbLockRetrySleepMs) * 1000000L;
       if (::nanosleep(&sleep_for, nullptr) < 0 && errno != EINTR) {
-        throw std::runtime_error("failed to lock DB directory " +
-                                 directory.string() + ": " +
+        throw std::runtime_error("failed to lock " + lock.string() + ": " +
                                  std::strerror(errno));
       }
       waited_ms += kDbLockRetrySleepMs;
       continue;
     }
-    throw std::runtime_error("failed to lock DB directory " +
-                             directory.string() + ": " + std::strerror(errno));
+    throw std::runtime_error("failed to lock " + lock.string() + ": " +
+                             std::strerror(errno));
   }
   chmod_db_file_if_exists(path);
   return std::make_unique<LinuxFileLock>(std::move(fd));

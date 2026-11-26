@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <exception>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -44,6 +45,9 @@ public:
   /// What the last request for targets asked of vdsd.
   const vds::TargetQuery &target_query() const { return target_query_; }
 
+  /// From now on asking bluetoothd fails, as on a PC without an adapter.
+  void take_bluetoothd_down() { bluetoothd_down_ = true; }
+
   /// The controller database as vdsd wrote it.
   std::string database() const {
     QFile file(QString::fromStdString(db_path_));
@@ -69,13 +73,27 @@ public:
         vds::trim_command(request.toStdString()), db_path_, statuses_, kPorts,
         [this](const vds::TargetQuery &query) {
           target_query_ = query;
-          return std::vector<vds::ControllerTarget>{{
-              .address = "aa:bb:cc:dd:ee:01",
-              .name = "DualSense Wireless Controller",
-              .profile = vds::ControllerProfile::Ds5,
-              .online = false,
+          std::vector<vds::ControllerTarget> targets;
+          if (query.bluetooth) {
+            if (bluetoothd_down_) {
+              throw std::runtime_error("failed to query BlueZ objects");
+            }
+            targets.push_back({
+                .address = "aa:bb:cc:dd:ee:01",
+                .name = "DualSense Wireless Controller",
+                .profile = vds::ControllerProfile::Ds5,
+                .online = false,
+                .trusted = true,
+            });
+          }
+          targets.push_back({
+              .address = "steam:FXA1234567B89",
+              .name = "Steam Controller",
+              .profile = vds::ControllerProfile::Unspecified,
+              .online = true,
               .trusted = true,
-          }};
+          });
+          return targets;
         },
         vds::VdsdControlDaemonStatus{.version = "1.2.3",
                                      .kernel_fix = kernel_fix_},
@@ -92,6 +110,7 @@ private:
   std::optional<bool> kernel_fix_;
   std::string buzzed_;
   vds::TargetQuery target_query_;
+  bool bluetoothd_down_ = false;
 };
 
 std::string error_of(Daemon &daemon, const QByteArray &request,
@@ -196,6 +215,21 @@ void test_unpaired_address_surfaces_the_daemon_error_text() {
                         }),
                std::string("address is not paired, not supported, or not "
                            "attachable; run vdsctl list-targets"));
+}
+
+void test_steam_controller_is_registered_while_bluetoothd_is_down() {
+  Daemon daemon;
+  daemon.take_bluetoothd_down();
+  VDS_CHECK_EQ(error_of(daemon,
+                        vds::gui::attach_request({
+                            .address = "steam:FXA1234567B89",
+                            .profile = vds::ControllerProfile::Unspecified,
+                            .ports = {},
+                        }),
+                        [](const QByteArray &reply) {
+                          (void)vds::gui::parse_attach_reply(reply);
+                        }),
+               std::string());
 }
 
 void test_detaching_an_unregistered_address_surfaces_the_daemon_error_text() {
@@ -483,6 +517,7 @@ void run_tests() {
   test_local_target_request_leaves_the_pucks_to_other_programs();
   test_claiming_target_request_asks_for_the_pucks();
   test_unpaired_address_surfaces_the_daemon_error_text();
+  test_steam_controller_is_registered_while_bluetoothd_is_down();
   test_detaching_an_unregistered_address_surfaces_the_daemon_error_text();
   test_enabled_trace_scope_is_read_back_from_the_status_reply();
   test_new_controller_starts_with_the_standard_audio_buffer();

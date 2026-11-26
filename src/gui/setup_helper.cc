@@ -19,7 +19,18 @@ constexpr int kAuthorizationFailed = 127;
 
 void run_setup_helper(QObject *context, const QStringList &actions,
                       std::function<void(const QString &)> on_done) {
-  auto *process = new QProcess(context);
+  /*
+   * Not a child of context: a QProcess destroyed while running reports
+   * finished from its destructor, and a widget deletes its children before
+   * it drops its connections, so on_done would run on a dead page.
+   */
+  auto *process = new QProcess;
+  QObject::connect(context, &QObject::destroyed, process, [process] {
+    process->disconnect();
+    QObject::connect(process, &QProcess::finished, process,
+                     &QObject::deleteLater);
+    process->kill();
+  });
   QObject::connect(
       process, &QProcess::finished, context,
       [process, on_done](int exit_code, QProcess::ExitStatus status) {

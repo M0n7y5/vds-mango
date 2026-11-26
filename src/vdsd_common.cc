@@ -433,7 +433,9 @@ std::string handle_attach_control_request(
           require_jsonl_string(fields, "audio_buffer", context));
     }
 
-    const std::vector<ControllerTarget> targets = list_targets({});
+    /* A Steam Controller must stay addable while bluetoothd is down. */
+    const std::vector<ControllerTarget> targets = list_targets(
+        TargetQuery{.bluetooth = !is_steam_address(config.address)});
     const ControllerTarget *target =
         find_controller_target_by_address(targets, config.address);
     if (target == nullptr) {
