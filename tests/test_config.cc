@@ -76,6 +76,45 @@ void test_record_of_a_steam_controller_is_read() {
                std::string("steam:FXA1234567B89"));
 }
 
+void test_untuned_steam_controller_plays_haptics_at_eighty_percent() {
+  const vds::SteamTuning tuning =
+      vds::parse_config_db("{\"address\":\"steam:FXA1234567B89\","
+                           "\"profile\":\"\",\"ports\":[]}\n")
+          .controllers.at(0)
+          .steam;
+  VDS_CHECK_EQ(static_cast<unsigned>(tuning.haptics_strength), 80u);
+}
+
+void test_record_carries_its_steam_tuning() {
+  const vds::SteamTuning tuning =
+      vds::parse_config_db(
+          "{\"address\":\"steam:FXA1234567B89\",\"profile\":\"\",\"ports\":[],"
+          "\"haptics_strength\":\"55\",\"rumble_strength\":\"0\","
+          "\"pad_click\":\"off\"}\n")
+          .controllers.at(0)
+          .steam;
+  VDS_CHECK(tuning.haptics_strength == 55 && tuning.rumble_strength == 0 &&
+            tuning.pad_click == vds::PadClick::Off);
+}
+
+void test_strength_above_one_hundred_in_a_record_is_rejected() {
+  VDS_CHECK_THROWS(vds::parse_config_db(
+      "{\"address\":\"steam:FXA1234567B89\",\"profile\":\"\",\"ports\":[],"
+      "\"haptics_strength\":\"101\"}\n"));
+}
+
+void test_strength_with_a_percent_sign_in_a_record_is_rejected() {
+  VDS_CHECK_THROWS(vds::parse_config_db(
+      "{\"address\":\"steam:FXA1234567B89\",\"profile\":\"\",\"ports\":[],"
+      "\"rumble_strength\":\"80%\"}\n"));
+}
+
+void test_unknown_trackpad_click_in_a_record_is_rejected() {
+  VDS_CHECK_THROWS(vds::parse_config_db(
+      "{\"address\":\"steam:FXA1234567B89\",\"profile\":\"\",\"ports\":[],"
+      "\"pad_click\":\"hard\"}\n"));
+}
+
 void run_tests() {
   test_one_bad_line_drops_every_controller();
   test_dash_separated_address_normalizes_to_colon_form();
@@ -87,6 +126,11 @@ void run_tests() {
   test_steam_serial_with_a_path_separator_is_rejected();
   test_empty_steam_serial_is_rejected();
   test_record_of_a_steam_controller_is_read();
+  test_untuned_steam_controller_plays_haptics_at_eighty_percent();
+  test_record_carries_its_steam_tuning();
+  test_strength_above_one_hundred_in_a_record_is_rejected();
+  test_strength_with_a_percent_sign_in_a_record_is_rejected();
+  test_unknown_trackpad_click_in_a_record_is_rejected();
 }
 
 } // namespace vds::test

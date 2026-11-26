@@ -30,6 +30,8 @@ struct ControllerStatus {
   /// as 1.16.42.
   QString firmware;
   QString firmware_build;
+  /// How a Steam Controller plays haptics, rumble and trackpad clicks.
+  SteamTuning steam = {};
 };
 
 struct PairedController {
@@ -46,6 +48,8 @@ struct ControllerAssignment {
   std::vector<unsigned> ports;
   /// Unset leaves the controller's saved haptics and speaker delay alone.
   std::optional<unsigned> audio_buffer = std::nullopt;
+  /// Unset leaves the saved tuning of a Steam Controller alone.
+  std::optional<SteamTuning> steam = std::nullopt;
 };
 
 struct AttachResult {

@@ -69,6 +69,11 @@ public:
   /// switched off.
   std::optional<UsbInputReport> read_input();
   std::optional<BatteryState> battery() const { return translator_.battery(); }
+  /// Takes effect with the next sound, rumble command and click.
+  void set_tuning(const SteamTuning &tuning) {
+    tuning_ = tuning;
+    encoder_.set_strength(tuning.haptics_strength);
+  }
   void apply_usb_output_report(std::span<const std::uint8_t> report,
                                Clock::time_point now);
   void push_usb_audio(std::span<const std::uint8_t> pcm_bytes,
@@ -92,6 +97,7 @@ private:
   UniqueFd hidraw_fd_;
   SteamInputTranslator translator_;
   SteamHapticsEncoder encoder_;
+  SteamTuning tuning_;
   std::optional<SteamRumbleReport> rumble_;
   StreamStats stream_stats_;
   Clock::time_point next_settings_;

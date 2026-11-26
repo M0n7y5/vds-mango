@@ -286,22 +286,39 @@ void test_pairing_report_carries_the_bytes_a_dualsense_sends_after_it() {
 }
 
 void test_rumble_scales_the_motors_to_sixteen_bits() {
-  const auto rumble = steam_rumble_report(output_report(0x03, 0, 0x40, 0xff));
+  const auto rumble =
+      steam_rumble_report(output_report(0x03, 0, 0x40, 0xff), 100);
   const SteamRumbleReport expected = {0x80, 0x00, 0x00, 0x00, 0xff,
                                       0xff, 0x00, 0x40, 0x40, 0x00};
   VDS_CHECK(rumble && *rumble == expected);
 }
 
 void test_rumble_follows_the_newer_vibration_flag() {
-  VDS_CHECK(steam_rumble_report(output_report(0x00, 0x04, 0x40, 0xff)));
+  VDS_CHECK(steam_rumble_report(output_report(0x00, 0x04, 0x40, 0xff), 100));
 }
 
 void test_output_report_without_rumble_flags_leaves_the_motors_alone() {
-  VDS_CHECK(!steam_rumble_report(output_report(0x00, 0x00, 0x40, 0xff)));
+  VDS_CHECK(!steam_rumble_report(output_report(0x00, 0x00, 0x40, 0xff), 100));
 }
 
 void test_zero_rumble_is_not_active() {
-  const auto rumble = steam_rumble_report(output_report(0x03, 0, 0, 0));
+  const auto rumble = steam_rumble_report(output_report(0x03, 0, 0, 0), 100);
+  VDS_CHECK(rumble && !steam_rumble_active(*rumble));
+}
+
+void test_rumble_at_half_strength_halves_the_motor_speeds() {
+  // 0xff is 65535 at full strength and 0x40 is 16448: half is 0x7fff and
+  // 0x2020.
+  const auto rumble =
+      steam_rumble_report(output_report(0x03, 0, 0x40, 0xff), 50);
+  const SteamRumbleReport expected = {0x80, 0x00, 0x00, 0x00, 0xff,
+                                      0x7f, 0x00, 0x20, 0x20, 0x00};
+  VDS_CHECK(rumble && *rumble == expected);
+}
+
+void test_rumble_turned_off_is_not_active() {
+  const auto rumble =
+      steam_rumble_report(output_report(0x03, 0, 0x40, 0xff), 0);
   VDS_CHECK(rumble && !steam_rumble_active(*rumble));
 }
 
@@ -324,12 +341,22 @@ void test_stream_stop_names_the_grips() {
 
 void test_pressing_the_left_pad_plays_a_strong_click_on_it() {
   const SteamClickReport expected = {0x82, 0x00, 0x02, 0x00};
-  VDS_CHECK(steam_pad_click_report(0, true) == expected);
+  VDS_CHECK(steam_pad_click_report(0, true, PadClick::Strong) == expected);
 }
 
 void test_letting_go_of_the_right_pad_plays_a_light_click_on_it() {
   const SteamClickReport expected = {0x82, 0x01, 0x01, 0x00};
-  VDS_CHECK(steam_pad_click_report(1, false) == expected);
+  VDS_CHECK(steam_pad_click_report(1, false, PadClick::Strong) == expected);
+}
+
+void test_soft_click_plays_the_click_twelve_decibels_quieter() {
+  // -12 as a signed byte is 0xf4.
+  const SteamClickReport expected = {0x82, 0x00, 0x01, 0xf4};
+  VDS_CHECK(steam_pad_click_report(0, true, PadClick::Soft) == expected);
+}
+
+void test_click_turned_off_plays_nothing() {
+  VDS_CHECK(!steam_pad_click_report(0, true, PadClick::Off));
 }
 
 void test_translator_reports_the_pressed_pad() {
@@ -406,6 +433,20 @@ void test_queue_keeps_at_most_three_packets() {
   VDS_CHECK_EQ(encoder.queued_frames(), std::size_t{93});
 }
 
+void test_haptics_at_half_strength_halve_the_sample() {
+  // 2000 becomes 1000, which is 0xce in mu-law.
+  SteamHapticsEncoder encoder;
+  encoder.set_strength(50);
+  (void)encoder.push_usb_audio(pcm(12, {0, 0, 2000, 2000}));
+  VDS_CHECK_EQ(encoder.pop_packet()[2], Byte{0xce});
+}
+
+void test_haptics_turned_off_are_no_signal() {
+  SteamHapticsEncoder encoder;
+  encoder.set_strength(0);
+  VDS_CHECK(!encoder.push_usb_audio(pcm(12, {0, 0, 1000, 1000})));
+}
+
 void run_tests() {
   test_mulaw_encodes_silence_as_ff();
   test_mulaw_encodes_positive_full_scale_as_80();
@@ -444,11 +485,15 @@ void run_tests() {
   test_rumble_follows_the_newer_vibration_flag();
   test_output_report_without_rumble_flags_leaves_the_motors_alone();
   test_zero_rumble_is_not_active();
+  test_rumble_at_half_strength_halves_the_motor_speeds();
+  test_rumble_turned_off_is_not_active();
   test_settings_turn_lizard_mode_off_and_the_motion_sensors_on();
   test_stream_starts_on_the_grips_at_four_kilohertz_mulaw();
   test_stream_stop_names_the_grips();
   test_pressing_the_left_pad_plays_a_strong_click_on_it();
   test_letting_go_of_the_right_pad_plays_a_light_click_on_it();
+  test_soft_click_plays_the_click_twelve_decibels_quieter();
+  test_click_turned_off_plays_nothing();
   test_translator_reports_the_pressed_pad();
   test_translator_reports_the_pad_let_go();
   test_twelve_usb_frames_make_one_stream_sample();
@@ -460,6 +505,8 @@ void run_tests() {
   test_usb_frame_split_across_two_pushes_is_reassembled();
   test_full_scale_haptics_reach_the_grips_at_eighty_percent();
   test_queue_keeps_at_most_three_packets();
+  test_haptics_at_half_strength_halve_the_sample();
+  test_haptics_turned_off_are_no_signal();
 }
 
 } // namespace vds::test

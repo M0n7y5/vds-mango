@@ -213,6 +213,9 @@ state, the virtual port while connected, and the last connection error.
 
 `audio_buffer` appears only once a controller's haptics and speaker delay was
 changed from Standard in the graphical app.
+A Steam Controller's record can also carry `haptics_strength`,
+`rumble_strength` (both 0 to 100) and `pad_click` (`off`, `soft` or `strong`),
+again only once they were changed from 80, 100 and `strong`.
 
 With `--ports 0,2`, `vdsctl list` reports `vds0` or `vds2` as the active
 virtual port.

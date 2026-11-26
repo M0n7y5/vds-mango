@@ -233,6 +233,7 @@ std::string format_control_list_reply(
     reply += ',';
     reply += jsonl_string_field(
         "audio_buffer", std::to_string(controller.audio_buffer_length));
+    reply += steam_tuning_fields(controller.steam, false);
     const auto battery = status ? status->battery_percent : std::nullopt;
     reply += ',';
     reply +=
@@ -417,6 +418,9 @@ std::string handle_attach_control_request(
         "profile",
         "ports",
         "audio_buffer",
+        "haptics_strength",
+        "rumble_strength",
+        "pad_click",
     };
     reject_unknown_jsonl_fields(fields, expected, context);
 
@@ -452,6 +456,9 @@ std::string handle_attach_control_request(
       if (existing != nullptr && !has_audio_buffer) {
         config.audio_buffer_length = existing->audio_buffer_length;
       }
+      config.steam = read_steam_tuning(
+          fields, context,
+          existing != nullptr ? existing->steam : SteamTuning{});
       upsert_controller_config(db, config);
       validate_config_assignments(db, devices);
     });

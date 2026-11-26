@@ -103,6 +103,11 @@ constexpr std::size_t kRumbleRightOffset = 7;
 constexpr std::uint8_t kClickReportId = 0x82;
 constexpr std::uint8_t kClick = 1;
 constexpr std::uint8_t kClickStrong = 2;
+/*
+ * At the same gain a player could not tell the two click commands apart.
+ * 12 dB less felt clearly softer and 18 dB less was too weak to notice.
+ */
+constexpr std::int8_t kSoftClickGainDb = -12;
 constexpr std::uint8_t kStreamConfigReportId = 0x86;
 constexpr std::uint8_t kStreamDataReportId = 0x88;
 constexpr std::uint8_t kStreamStop = 1;
@@ -124,11 +129,6 @@ static_assert(VDS_AUDIO_SAMPLE_RATE % kSteamStreamSampleRate == 0);
 constexpr std::size_t kHapticsFirstChannel = 2;
 /* Bounds how far the grips can fall behind the game: 23 ms. */
 constexpr std::size_t kMaxQueuedFrames = 3 * kSteamStreamFrames;
-/*
- * For the same signal the grips shake harder than a DualSense's. At 80% a
- * player found Ratchet & Clank to feel right.
- */
-constexpr int kStrengthPercent = 80;
 
 std::int16_t le16(std::span<const std::uint8_t> bytes, std::size_t offset) {
   return static_cast<std::int16_t>(
@@ -370,7 +370,8 @@ steam_virtual_feature_reports(std::string_view serial) {
 }
 
 std::optional<SteamRumbleReport>
-steam_rumble_report(std::span<const std::uint8_t> usb_output_report) {
+steam_rumble_report(std::span<const std::uint8_t> usb_output_report,
+                    unsigned strength_percent) {
   if (usb_output_report.size() <= kDsOutputFlags2Offset ||
       usb_output_report[0] != kDsOutputReportId) {
     return std::nullopt;
@@ -383,11 +384,15 @@ steam_rumble_report(std::span<const std::uint8_t> usb_output_report) {
   }
   SteamRumbleReport report{};
   report[0] = kRumbleReportId;
-  /* The motors take 16 bits; repeating the byte maps 255 to 65535. */
-  const std::uint8_t left = usb_output_report[kDsOutputLeftMotorOffset];
-  const std::uint8_t right = usb_output_report[kDsOutputRightMotorOffset];
-  report[kRumbleLeftOffset] = report[kRumbleLeftOffset + 1] = left;
-  report[kRumbleRightOffset] = report[kRumbleRightOffset + 1] = right;
+  /* The motors take 16 bits: 257 maps 255 to 65535. */
+  const auto motor = [&](std::size_t from, std::size_t to) {
+    const unsigned speed =
+        usb_output_report[from] * 257u * strength_percent / 100;
+    report[to] = static_cast<std::uint8_t>(speed & 0xff);
+    report[to + 1] = static_cast<std::uint8_t>(speed >> 8);
+  };
+  motor(kDsOutputLeftMotorOffset, kRumbleLeftOffset);
+  motor(kDsOutputRightMotorOffset, kRumbleRightOffset);
   return report;
 }
 
@@ -412,10 +417,19 @@ SteamStreamConfig steam_stream_config_report(bool enable) {
           enable ? kStreamMode4kHzMulaw : std::uint8_t{0}};
 }
 
-SteamClickReport steam_pad_click_report(std::size_t pad, bool pressed) {
-  /* Side 0 is the left trackpad, 1 the right; the last byte is 0 dB. */
-  return {kClickReportId, static_cast<std::uint8_t>(pad),
-          pressed ? kClickStrong : kClick, 0};
+std::optional<SteamClickReport>
+steam_pad_click_report(std::size_t pad, bool pressed, PadClick click) {
+  if (click == PadClick::Off) {
+    return std::nullopt;
+  }
+  /* Side 0 is the left trackpad, 1 the right; the last byte is a gain. */
+  if (click == PadClick::Soft) {
+    return SteamClickReport{kClickReportId, static_cast<std::uint8_t>(pad),
+                            kClick,
+                            static_cast<std::uint8_t>(kSoftClickGainDb)};
+  }
+  return SteamClickReport{kClickReportId, static_cast<std::uint8_t>(pad),
+                          pressed ? kClickStrong : kClick, 0};
 }
 
 bool SteamHapticsEncoder::push_usb_audio(
@@ -439,10 +453,10 @@ bool SteamHapticsEncoder::push_usb_audio(
     /* Averaging is the low-pass: haptics sit far below the 2 kHz limit. */
     queue_.push_back(Frame{
         .left = mulaw_encode(static_cast<std::int16_t>(
-            sum_[0] * kStrengthPercent /
+            sum_[0] * strength_percent_ /
             (100 * static_cast<int>(kDecimation)))),
         .right = mulaw_encode(static_cast<std::int16_t>(
-            sum_[1] * kStrengthPercent /
+            sum_[1] * strength_percent_ /
             (100 * static_cast<int>(kDecimation)))),
     });
     sum_ = {};
@@ -451,7 +465,8 @@ bool SteamHapticsEncoder::push_usb_audio(
       queue_.pop_front();
     }
   }
-  return signal;
+  /* A muted signal must not keep a stream of silence running. */
+  return signal && strength_percent_ != 0;
 }
 
 SteamStreamPacket SteamHapticsEncoder::pop_packet() {

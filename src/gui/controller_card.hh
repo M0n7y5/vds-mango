@@ -53,7 +53,9 @@ private:
   QLabel *battery_text_ = nullptr;
   Pill *profile_ = nullptr;
   Pill *port_ = nullptr;
-  Pill *delay_ = nullptr;
+  /// The haptics delay of a DualSense, the haptics strength of a Steam
+  /// Controller.
+  Pill *tuning_ = nullptr;
   QLabel *headset_ = nullptr;
   QLabel *mic_ = nullptr;
   QLabel *detail_ = nullptr;

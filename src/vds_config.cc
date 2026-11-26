@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <charconv>
 #include <filesystem>
 #include <limits>
 #include <sstream>
@@ -58,12 +59,13 @@ std::string serialize_config_db(const vds::ConfigDb &db) {
     text += ",";
     text += vds::jsonl_unsigned_array_field("ports", controller.ports);
     // Left out at the default so a database nobody tuned stays readable by
-    // daemons that predate the key.
+    // daemons that predate the keys.
     if (controller.audio_buffer_length != vds::kDefaultAudioBufferLength) {
       text += ",";
       text += vds::jsonl_string_field(
           "audio_buffer", std::to_string(controller.audio_buffer_length));
     }
+    text += vds::steam_tuning_fields(controller.steam, true);
     text += "}\n";
   }
   return text;
@@ -95,6 +97,9 @@ vds::ControllerConfig parse_controller_line(const std::string &line,
       "profile",
       "ports",
       "audio_buffer",
+      "haptics_strength",
+      "rumble_strength",
+      "pad_click",
   };
   vds::reject_unknown_jsonl_fields(fields, expected, context);
 
@@ -110,6 +115,7 @@ vds::ControllerConfig parse_controller_line(const std::string &line,
     config.audio_buffer_length = vds::parse_audio_buffer_length(
         vds::require_jsonl_string(fields, "audio_buffer", context));
   }
+  config.steam = vds::read_steam_tuning(fields, context, {});
   return config;
 }
 
@@ -222,6 +228,77 @@ std::uint8_t parse_audio_buffer_length(std::string_view text) {
     }
   }
   throw std::runtime_error("audio buffer must be 16, 24, 32 or 64");
+}
+
+namespace {
+
+std::uint8_t parse_strength_percent(std::string_view text) {
+  unsigned percent = 0;
+  const char *const end = text.data() + text.size();
+  const auto [parsed, error] = std::from_chars(text.data(), end, percent);
+  if (error != std::errc{} || parsed != end || percent > 100) {
+    throw std::runtime_error("strength must be a whole number from 0 to 100");
+  }
+  return static_cast<std::uint8_t>(percent);
+}
+
+} // namespace
+
+PadClick parse_pad_click(std::string_view text) {
+  for (const PadClick click :
+       {PadClick::Off, PadClick::Soft, PadClick::Strong}) {
+    if (text == pad_click_name(click)) {
+      return click;
+    }
+  }
+  throw std::runtime_error("trackpad click must be off, soft or strong");
+}
+
+std::string pad_click_name(PadClick click) {
+  switch (click) {
+  case PadClick::Off:
+    return "off";
+  case PadClick::Soft:
+    return "soft";
+  case PadClick::Strong:
+    break;
+  }
+  return "strong";
+}
+
+SteamTuning read_steam_tuning(std::span<const JsonlField> fields,
+                              std::string_view context, SteamTuning tuning) {
+  if (has_jsonl_field(fields, "haptics_strength")) {
+    tuning.haptics_strength = parse_strength_percent(
+        require_jsonl_string(fields, "haptics_strength", context));
+  }
+  if (has_jsonl_field(fields, "rumble_strength")) {
+    tuning.rumble_strength = parse_strength_percent(
+        require_jsonl_string(fields, "rumble_strength", context));
+  }
+  if (has_jsonl_field(fields, "pad_click")) {
+    tuning.pad_click =
+        parse_pad_click(require_jsonl_string(fields, "pad_click", context));
+  }
+  return tuning;
+}
+
+std::string steam_tuning_fields(const SteamTuning &tuning, bool only_changed) {
+  const SteamTuning initial;
+  std::string text;
+  if (!only_changed || tuning.haptics_strength != initial.haptics_strength) {
+    text += "," + jsonl_string_field("haptics_strength",
+                                     std::to_string(tuning.haptics_strength));
+  }
+  if (!only_changed || tuning.rumble_strength != initial.rumble_strength) {
+    text += "," + jsonl_string_field("rumble_strength",
+                                     std::to_string(tuning.rumble_strength));
+  }
+  if (!only_changed || tuning.pad_click != initial.pad_click) {
+    text += "," + jsonl_string_field("pad_click",
+                                     pad_click_name(tuning.pad_click));
+  }
+  return text;
 }
 
 ControllerProfile parse_controller_profile(std::string_view profile) {

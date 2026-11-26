@@ -68,6 +68,17 @@ ControllerProfile require_profile(const QJsonObject &object) {
       require_string(object, "profile").toStdString());
 }
 
+SteamTuning require_steam_tuning(const QJsonObject &object) {
+  return {
+      .haptics_strength = static_cast<std::uint8_t>(
+          require_string(object, "haptics_strength").toUInt()),
+      .rumble_strength = static_cast<std::uint8_t>(
+          require_string(object, "rumble_strength").toUInt()),
+      .pad_click =
+          parse_pad_click(require_string(object, "pad_click").toStdString()),
+  };
+}
+
 std::vector<QJsonObject> reply_objects(const QByteArray &reply) {
   std::vector<QJsonObject> objects;
   const QList<QByteArray> lines = reply.split('\n');
@@ -129,6 +140,14 @@ QByteArray attach_request(const ControllerAssignment &assignment) {
   if (assignment.audio_buffer) {
     request.insert("audio_buffer", QString::number(*assignment.audio_buffer));
   }
+  if (assignment.steam) {
+    request.insert("haptics_strength",
+                   QString::number(assignment.steam->haptics_strength));
+    request.insert("rumble_strength",
+                   QString::number(assignment.steam->rumble_strength));
+    request.insert("pad_click", QString::fromStdString(pad_click_name(
+                                    assignment.steam->pad_click)));
+  }
   return request_line(request);
 }
 
@@ -176,6 +195,7 @@ std::vector<ControllerStatus> parse_list_reply(const QByteArray &reply) {
         .mic_muted = require_bool(object, "mic_muted"),
         .firmware = require_string(object, "firmware"),
         .firmware_build = require_string(object, "firmware_build"),
+        .steam = require_steam_tuning(object),
     });
   }
   return controllers;

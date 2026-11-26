@@ -223,7 +223,11 @@ std::optional<UsbInputReport> SteamBackend::read_input() {
       const bool clicked = translator_.pad_clicked(pad);
       if (clicked != pad_clicked_[pad]) {
         pad_clicked_[pad] = clicked;
-        write_report(steam_pad_click_report(pad, clicked));
+        const auto click =
+            steam_pad_click_report(pad, clicked, tuning_.pad_click);
+        if (click) {
+          write_report(*click);
+        }
       }
     }
     return usb;
@@ -245,7 +249,7 @@ void SteamBackend::note_stream_status(std::span<const std::uint8_t> report) {
 
 void SteamBackend::apply_usb_output_report(
     std::span<const std::uint8_t> report, Clock::time_point now) {
-  const auto rumble = steam_rumble_report(report);
+  const auto rumble = steam_rumble_report(report, tuning_.rumble_strength);
   if (!rumble) {
     return;
   }

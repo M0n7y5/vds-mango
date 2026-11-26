@@ -11,6 +11,7 @@
 #include <vector>
 
 #include <QByteArray>
+#include <QFile>
 #include <QTemporaryDir>
 
 #include "control_protocol.hh"
@@ -39,6 +40,13 @@ public:
 
   /// The controller the last buzz command asked vdsd to vibrate.
   const std::string &buzzed() const { return buzzed_; }
+
+  /// The controller database as vdsd wrote it.
+  std::string database() const {
+    QFile file(QString::fromStdString(db_path_));
+    (void)file.open(QIODevice::ReadOnly);
+    return file.readAll().toStdString();
+  }
 
   QByteArray handle(const QByteArray &request) {
     static const std::vector<vds::VdsdControlPortStatus> kPorts = {
@@ -239,6 +247,75 @@ void test_unmeasured_audio_buffer_surfaces_the_daemon_error_text() {
                std::string("audio buffer must be 16, 24, 32 or 64"));
 }
 
+void test_chosen_steam_tuning_is_listed_for_that_controller() {
+  Daemon daemon;
+  (void)daemon.handle(vds::gui::attach_request({
+      .address = "aa:bb:cc:dd:ee:01",
+      .profile = vds::ControllerProfile::Unspecified,
+      .ports = {},
+      .steam = vds::SteamTuning{.haptics_strength = 55,
+                                .rumble_strength = 40,
+                                .pad_click = vds::PadClick::Soft},
+  }));
+  const vds::SteamTuning listed =
+      vds::gui::parse_list_reply(daemon.handle(vds::gui::list_request()))
+          .at(0)
+          .steam;
+  VDS_CHECK(listed.haptics_strength == 55 && listed.rumble_strength == 40 &&
+            listed.pad_click == vds::PadClick::Soft);
+}
+
+void test_attach_without_steam_tuning_keeps_the_saved_one() {
+  Daemon daemon;
+  (void)daemon.handle(vds::gui::attach_request({
+      .address = "aa:bb:cc:dd:ee:01",
+      .profile = vds::ControllerProfile::Unspecified,
+      .ports = {},
+      .steam = vds::SteamTuning{.haptics_strength = 55},
+  }));
+  (void)daemon.handle(vds::gui::attach_request({
+      .address = "aa:bb:cc:dd:ee:01",
+      .profile = vds::ControllerProfile::Unspecified,
+      .ports = {1},
+  }));
+  const vds::SteamTuning listed =
+      vds::gui::parse_list_reply(daemon.handle(vds::gui::list_request()))
+          .at(0)
+          .steam;
+  VDS_CHECK_EQ(static_cast<unsigned>(listed.haptics_strength), 55u);
+}
+
+void test_untuned_controller_adds_no_key_to_the_database() {
+  // A daemon that predates the tuning refuses a record with keys it does not
+  // know, so a downgrade must still find an untouched database readable.
+  Daemon daemon;
+  (void)daemon.handle(vds::gui::attach_request({
+      .address = "aa:bb:cc:dd:ee:01",
+      .profile = vds::ControllerProfile::Unspecified,
+      .ports = {},
+      .steam = vds::SteamTuning{},
+  }));
+  VDS_CHECK_EQ(daemon.database(),
+               std::string("{\"address\":\"aa:bb:cc:dd:ee:01\","
+                           "\"profile\":\"\",\"ports\":[]}\n"));
+}
+
+void test_strength_above_one_hundred_surfaces_the_daemon_error_text() {
+  Daemon daemon;
+  VDS_CHECK_EQ(
+      error_of(daemon,
+               vds::gui::attach_request({
+                   .address = "aa:bb:cc:dd:ee:01",
+                   .profile = vds::ControllerProfile::Unspecified,
+                   .ports = {},
+                   .steam = vds::SteamTuning{.haptics_strength = 120},
+               }),
+               [](const QByteArray &reply) {
+                 (void)vds::gui::parse_attach_reply(reply);
+               }),
+      std::string("strength must be a whole number from 0 to 100"));
+}
+
 void test_battery_of_a_connected_controller_reaches_the_gui() {
   Daemon daemon;
   (void)daemon.handle(vds::gui::attach_request({
@@ -375,6 +452,10 @@ void run_tests() {
   test_chosen_audio_buffer_is_listed_for_that_controller();
   test_attach_without_an_audio_buffer_keeps_the_saved_one();
   test_unmeasured_audio_buffer_surfaces_the_daemon_error_text();
+  test_chosen_steam_tuning_is_listed_for_that_controller();
+  test_attach_without_steam_tuning_keeps_the_saved_one();
+  test_untuned_controller_adds_no_key_to_the_database();
+  test_strength_above_one_hundred_surfaces_the_daemon_error_text();
   test_battery_of_a_connected_controller_reaches_the_gui();
   test_controller_that_is_off_lists_no_battery_level();
   test_firmware_keeps_the_leading_zero_sony_prints();

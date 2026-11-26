@@ -240,7 +240,8 @@ qt_add_resources(
   vds-mango "icons" PREFIX "/icons" BASE "data/icons"
   FILES data/icons/vds-mango.svg data/icons/dualsense.svg
         data/icons/dualsense-edge.svg data/icons/headset.svg
-        data/icons/microphone.svg data/icons/microphone-muted.svg)
+        data/icons/microphone.svg data/icons/microphone-muted.svg
+        data/icons/steam-controller.svg)
 
 set(VDS_POLKIT_POLICY
     ${CMAKE_CURRENT_BINARY_DIR}/io.github.m0n7y5.vds-mango.policy)

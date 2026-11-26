@@ -229,11 +229,11 @@ ControllerCard::ControllerCard(std::function<void()> on_test,
 
   profile_ = new Pill(kChipRadius, this);
   port_ = new Pill(kChipRadius, this);
-  delay_ = new Pill(kChipRadius, this);
+  tuning_ = new Pill(kChipRadius, this);
   auto *chips = new QHBoxLayout;
   chips->addWidget(profile_);
   chips->addWidget(port_);
-  chips->addWidget(delay_);
+  chips->addWidget(tuning_);
   chips->addStretch(1);
 
   headset_ = new QLabel(this);
@@ -277,19 +277,23 @@ void ControllerCard::show_controller(const ControllerStatus &controller,
                         : controller.address + " · Firmware " +
                               controller.firmware);
 
+  const bool steam = is_steam_address(controller.address.toStdString());
   const bool edge = name.contains("Edge");
-  const int picture_state = (edge ? 2 : 0) | (connected_ ? 1 : 0);
+  const int picture_state =
+      (steam ? 4 : 0) | (edge ? 2 : 0) | (connected_ ? 1 : 0);
   if (picture_state != picture_state_) {
     picture_state_ = picture_state;
     picture_->setPixmap(tinted_picture(
-        edge ? ":/icons/dualsense-edge.svg" : ":/icons/dualsense.svg",
+        steam  ? ":/icons/steam-controller.svg"
+        : edge ? ":/icons/dualsense-edge.svg"
+               : ":/icons/dualsense.svg",
         kPictureSize,
         tone_color(connected_ ? Tone::Plain : Tone::Muted, palette()),
         devicePixelRatioF()));
   }
 
-  headset_->setVisible(connected_);
-  mic_->setVisible(connected_);
+  headset_->setVisible(connected_ && !steam);
+  mic_->setVisible(connected_ && !steam);
   const int state_icons =
       (controller.headset ? 1 : 0) | (controller.mic_muted ? 2 : 0);
   if (connected_ && state_icons != state_icons_) {
@@ -321,7 +325,8 @@ void ControllerCard::show_controller(const ControllerStatus &controller,
     status_->show_text(Tone::Negative, "Failed");
     detail = controller.error;
   } else {
-    status_->show_text(Tone::Muted, "Press PS to connect");
+    status_->show_text(Tone::Muted, steam ? "Switch it on to connect"
+                                          : "Press PS to connect");
   }
   detail_->setText(detail);
   detail_->setToolTip(detail);
@@ -334,10 +339,14 @@ void ControllerCard::show_controller(const ControllerStatus &controller,
                            (controller.charging ? "%, charging" : "%"));
   }
 
-  profile_->show_text(Tone::Plain,
-                      controller.profile == ControllerProfile::Unspecified
-                          ? QString("Appears as itself")
-                          : "Appears as " + profile_label(controller.profile));
+  if (steam) {
+    profile_->show_text(Tone::Plain, "Appears as DualSense");
+  } else {
+    profile_->show_text(
+        Tone::Plain, controller.profile == ControllerProfile::Unspecified
+                         ? QString("Appears as itself")
+                         : "Appears as " + profile_label(controller.profile));
+  }
   if (controller.connected) {
     port_->show_text(Tone::Plain, "Port " + controller.path);
   } else if (controller.ports.empty()) {
@@ -347,8 +356,15 @@ void ControllerCard::show_controller(const ControllerStatus &controller,
                      (controller.ports.size() == 1 ? "Port " : "Ports ") +
                          ports_label(controller.ports));
   }
-  delay_->show_text(Tone::Plain,
-                    "Delay: " + delay_name(controller.audio_buffer));
+  if (steam) {
+    const unsigned haptics = controller.steam.haptics_strength;
+    tuning_->show_text(Tone::Plain,
+                       haptics == 0 ? QString("Haptics: off")
+                                    : QString("Haptics: %1%").arg(haptics));
+  } else {
+    tuning_->show_text(Tone::Plain,
+                       "Delay: " + delay_name(controller.audio_buffer));
+  }
   update();
 }
 

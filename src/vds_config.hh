@@ -10,6 +10,7 @@
 #include <string_view>
 #include <vector>
 
+#include "jsonl.hh"
 #include "uapi/vds.h"
 
 namespace vds {
@@ -33,6 +34,24 @@ enum class ControllerProfile {
   Dse,
 };
 
+/// The click a Steam Controller's trackpad plays when it is pressed down.
+enum class PadClick {
+  Off,
+  Soft,
+  Strong,
+};
+
+/// How a Steam Controller plays what a game sends to a DualSense.
+struct SteamTuning {
+  /// Percent of the game's haptics signal. For the same signal the grips
+  /// shake harder than a DualSense's; at 80 a player found Ratchet & Clank
+  /// to feel right.
+  std::uint8_t haptics_strength = 80;
+  /// Percent of the game's rumble motor values.
+  std::uint8_t rumble_strength = 100;
+  PadClick pad_click = PadClick::Strong;
+};
+
 struct ControllerConfig {
   std::string address;
   ControllerProfile profile = ControllerProfile::Unspecified;
@@ -40,6 +59,8 @@ struct ControllerConfig {
   /// How much audio the controller queues before it plays haptics and
   /// speaker sound.
   std::uint8_t audio_buffer_length = kDefaultAudioBufferLength;
+  /// Used by a Steam Controller only.
+  SteamTuning steam = {};
 };
 
 struct ControllerTarget {
@@ -63,6 +84,15 @@ std::string controller_profile_name(ControllerProfile profile);
 /// Accepts only the lengths confirmed to play on a DualSense: 16, 24, 32, 64.
 /// Other values garbled or muted the output (12, 0).
 std::uint8_t parse_audio_buffer_length(std::string_view text);
+PadClick parse_pad_click(std::string_view text);
+std::string pad_click_name(PadClick click);
+/// The tuning keys among fields replace the values of tuning; an absent key
+/// keeps its value.
+SteamTuning read_steam_tuning(std::span<const JsonlField> fields,
+                              std::string_view context, SteamTuning tuning);
+/// The tuning as JSONL fields, each led by a comma. only_changed leaves out
+/// the values a controller starts with.
+std::string steam_tuning_fields(const SteamTuning &tuning, bool only_changed);
 std::vector<unsigned> parse_ports(std::string_view text);
 std::string format_ports(std::span<const unsigned> ports);
 /// Virtual ports have no device node; this name identifies one to users.

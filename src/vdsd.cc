@@ -1975,6 +1975,7 @@ void complete_steam_controller(ControllerRuntime &controller,
     cache_feature_report(port, report, false, logger);
   }
   controller.steam.emplace(std::move(candidate));
+  controller.steam->set_tuning(controller.config.steam);
   /* The made-up feature reports are those of a plain DualSense. */
   controller.detected_profile = VDS_PROFILE_DS5;
   port.usb->connect(VDS_PROFILE_DS5);
@@ -2474,6 +2475,9 @@ void reconcile_controller_configs(std::vector<VirtualPort> &ports,
         next.device = std::move(old.device);
         next.backend = std::move(old.backend);
         next.steam = std::move(old.steam);
+        if (next.steam) {
+          next.steam->set_tuning(config.steam);
+        }
         next.virtual_connected = old.virtual_connected;
         active_devices.push_back(next.device);
       } else if (old_uses_port) {

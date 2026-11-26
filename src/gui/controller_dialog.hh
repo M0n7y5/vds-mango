@@ -13,11 +13,13 @@ class QCheckBox;
 class QComboBox;
 class QPushButton;
 class QRadioButton;
+class QSlider;
 
 namespace vds::gui {
 
-/// Changes which controller model games see, which virtual ports a
-/// registered controller may use, and its haptics and speaker delay.
+/// Changes which virtual ports a registered controller may use and, for a
+/// DualSense, which model games see and its haptics and speaker delay. A
+/// Steam Controller gets its haptics, rumble and trackpad click instead.
 class ControllerDialog : public QDialog {
 public:
   ControllerDialog(const ControllerStatus &controller, const QString &name,
@@ -29,8 +31,13 @@ private:
   void update_accept_button();
 
   QString address_;
+  /// Set for a DualSense only.
   QComboBox *profile_box_ = nullptr;
   QComboBox *delay_box_ = nullptr;
+  /// Set for a Steam Controller only.
+  QSlider *haptics_ = nullptr;
+  QSlider *rumble_ = nullptr;
+  QComboBox *click_box_ = nullptr;
   QRadioButton *chosen_ports_ = nullptr;
   std::array<QCheckBox *, kMaxPortCount> port_boxes_{};
   QPushButton *accept_button_ = nullptr;

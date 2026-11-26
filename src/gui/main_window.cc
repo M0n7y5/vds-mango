@@ -421,9 +421,20 @@ QString MainWindow::system_info() const {
     if (controller.battery) {
       facts << "battery " + QString::number(*controller.battery) + "%";
     }
-    facts << "appears as " + profile_label(controller.profile);
+    const bool steam = is_steam_address(controller.address.toStdString());
+    if (!steam) {
+      facts << "appears as " + profile_label(controller.profile);
+    }
     facts << "port " + ports_label(controller.ports);
-    facts << "delay " + QString::number(controller.audio_buffer);
+    if (steam) {
+      facts << QString("haptics %1%, rumble %2%, trackpad click %3")
+                   .arg(unsigned{controller.steam.haptics_strength})
+                   .arg(unsigned{controller.steam.rumble_strength})
+                   .arg(QString::fromStdString(
+                       pad_click_name(controller.steam.pad_click)));
+    } else {
+      facts << "delay " + QString::number(controller.audio_buffer);
+    }
     lines << "Controller: " + facts.join(", ");
   }
   return lines.join('\n');

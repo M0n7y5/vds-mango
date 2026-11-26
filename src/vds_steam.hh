@@ -11,6 +11,7 @@
 #include <string_view>
 #include <vector>
 
+#include "vds_config.hh"
 #include "vds_protocol.hh"
 
 namespace vds {
@@ -68,7 +69,8 @@ steam_virtual_feature_reports(std::string_view serial);
 /// The rumble command for a DualSense USB output report. Empty when the
 /// report leaves the rumble motors alone.
 std::optional<SteamRumbleReport>
-steam_rumble_report(std::span<const std::uint8_t> usb_output_report);
+steam_rumble_report(std::span<const std::uint8_t> usb_output_report,
+                    unsigned strength_percent);
 /// True when the rumble command drives a motor.
 bool steam_rumble_active(const SteamRumbleReport &report);
 
@@ -79,15 +81,20 @@ SteamSettingsReport steam_settings_report();
 /// Starts or stops the haptics stream on both grips.
 SteamStreamConfig steam_stream_config_report(bool enable);
 
-/// The click a trackpad plays when it is pressed down or let go. Outside
-/// its keyboard and mouse emulation the controller plays none by itself.
-SteamClickReport steam_pad_click_report(std::size_t pad, bool pressed);
+/// The click a trackpad plays when it is pressed down or let go: strong
+/// clicks harder on the press, soft plays a quieter click both times, off
+/// plays none. Outside its keyboard and mouse emulation the controller
+/// plays none by itself.
+std::optional<SteamClickReport>
+steam_pad_click_report(std::size_t pad, bool pressed, PadClick click);
 
 /// Turns the haptics pair of the DualSense USB audio format into the Steam
 /// Controller's haptics stream.
 class SteamHapticsEncoder {
 public:
-  /// True when the haptics pair carried a signal.
+  /// Percent of the incoming signal that reaches the grips.
+  void set_strength(std::uint8_t percent) { strength_percent_ = percent; }
+  /// True when the haptics pair carried a signal the grips will play.
   bool push_usb_audio(std::span<const std::uint8_t> pcm_bytes);
   std::size_t queued_frames() const { return queue_.size(); }
   /// The next stream report, filled up with silence.
@@ -103,6 +110,7 @@ private:
   std::array<std::uint8_t, VDS_AUDIO_CHANNELS * sizeof(std::int16_t)>
       pending_frame_{};
   std::size_t pending_frame_pos_ = 0;
+  int strength_percent_ = SteamTuning{}.haptics_strength;
   std::array<std::int32_t, 2> sum_{};
   unsigned summed_ = 0;
   std::deque<Frame> queue_;
