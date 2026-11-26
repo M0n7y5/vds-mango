@@ -8,13 +8,14 @@ pkgdesc="Bluetooth DualSense as a virtual USB one: haptics, adaptive triggers, s
 arch=('x86_64')
 url="https://github.com/M0n7y5/vds-mango"
 license=('MIT')
-depends=('bluez' 'dbus' 'gcc-libs' 'glibc' 'kmod' 'opus' 'polkit' 'qt6-base'
-         'qt6-svg' 'systemd-libs')
+depends=('bluez' 'dbus' 'glibc' 'hicolor-icon-theme' 'kmod' 'libgcc' 'libstdc++'
+         'opus' 'polkit' 'qt6-base' 'qt6-svg' 'systemd-libs')
 makedepends=('cmake' 'git' 'pkgconf')
 optdepends=('pipewire: controller haptics, speaker and microphone'
             'wireplumber: names and priorities of the controller audio devices'
             'logrotate: rotate /var/log/vdsd.log')
 conflicts=('vds')
+backup=('etc/logrotate.d/vds')
 install=vds-mango.install
 source=("git+${url}.git#tag=${_tag}")
 sha256sums=('SKIP')
