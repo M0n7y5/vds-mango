@@ -396,7 +396,7 @@ std::string format_control_trace_reply(bool ok, std::string_view error,
 std::string handle_attach_control_request(
     std::span<const JsonlField> fields, const std::string &db_path,
     std::span<const VdsdControlPortStatus> ports,
-    const std::function<std::vector<ControllerTarget>()> &list_targets,
+    const ControllerTargetLister &list_targets,
     bool &reload_requested, Logger &logger) {
   constexpr std::string_view context = "control request";
   ControllerConfig config{
@@ -433,7 +433,7 @@ std::string handle_attach_control_request(
           require_jsonl_string(fields, "audio_buffer", context));
     }
 
-    const std::vector<ControllerTarget> targets = list_targets();
+    const std::vector<ControllerTarget> targets = list_targets({});
     const ControllerTarget *target =
         find_controller_target_by_address(targets, config.address);
     if (target == nullptr) {
@@ -530,14 +530,22 @@ std::string handle_list_control_request(
 
 std::string handle_list_targets_control_request(
     std::span<const JsonlField> fields, const std::string &db_path,
-    const std::function<std::vector<ControllerTarget>()> &list_targets) {
+    const ControllerTargetLister &list_targets) {
   constexpr std::string_view context = "control request";
   static constexpr std::string_view expected[] = {
       "command",
+      "bluetooth",
+      "claim_pucks",
   };
   reject_unknown_jsonl_fields(fields, expected, context);
+  const TargetQuery query{
+      .bluetooth = !has_jsonl_field(fields, "bluetooth") ||
+                   require_jsonl_bool(fields, "bluetooth", context),
+      .claim_pucks = has_jsonl_field(fields, "claim_pucks") &&
+                     require_jsonl_bool(fields, "claim_pucks", context),
+  };
   return format_control_list_targets_reply(load_config_db(db_path),
-                                           list_targets());
+                                           list_targets(query));
 }
 
 std::string handle_trace_control_request(std::span<const JsonlField> fields,
@@ -632,7 +640,7 @@ std::string handle_vdsd_control_command(
     std::string_view request, const std::string &db_path,
     std::span<const VdsdControlControllerStatus> controllers,
     std::span<const VdsdControlPortStatus> ports,
-    const std::function<std::vector<ControllerTarget>()> &list_targets,
+    const ControllerTargetLister &list_targets,
     const VdsdControlDaemonStatus &daemon, std::uint32_t &trace_flags,
     bool &reload_requested, std::string &buzz_address, Logger &logger) {
   try {

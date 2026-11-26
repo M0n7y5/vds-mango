@@ -125,6 +125,12 @@ QByteArray list_targets_request() {
   return request_line(QJsonObject{{"command", "list-targets"}});
 }
 
+QByteArray local_targets_request(bool claim_pucks) {
+  return request_line(QJsonObject{{"command", "list-targets"},
+                                  {"bluetooth", false},
+                                  {"claim_pucks", claim_pucks}});
+}
+
 QByteArray attach_request(const ControllerAssignment &assignment) {
   QJsonArray ports;
   for (const unsigned port : assignment.ports) {

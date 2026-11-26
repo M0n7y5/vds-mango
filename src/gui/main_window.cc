@@ -109,7 +109,8 @@ QWidget *MainWindow::build_controllers_page() {
   title->setAlignment(Qt::AlignCenter);
   auto *hint = new QLabel("Add a DualSense and games see it as a USB "
                           "controller, with haptics, adaptive triggers and "
-                          "audio.",
+                          "audio. A Steam Controller on its Puck becomes a "
+                          "DualSense with haptics.",
                           this);
   hint->setWordWrap(true);
   hint->setAlignment(Qt::AlignCenter);

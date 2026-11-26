@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: MIT
 // Copyright (C) 2026 M0n7y5 <17201053+M0n7y5@users.noreply.github.com>
 
+#include <optional>
 #include <utility>
 #include <vector>
 
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QListWidget>
+#include <QPushButton>
 #include <QSet>
 #include <QStyle>
 #include <QTimer>
@@ -132,22 +134,47 @@ private:
   bool advance_when_ready_ = false;
 };
 
+struct Candidate {
+  /// The address vdsd registers the controller under.
+  QString address;
+  QString name;
+  /// Unset for a Steam Controller: its Puck needs no pairing.
+  std::optional<BluetoothDevice> bluetooth = std::nullopt;
+};
+
 class ControllerPage : public QWizardPage {
 public:
   ControllerPage(ControlClient &client, Bluez &bluez, QString &added_address)
       : client_(client), bluez_(bluez), added_address_(added_address) {
     setTitle("Add your controller");
-    setSubTitle("Hold Create and PS together until the light bar blinks "
-                "rapidly. Controllers that are already paired are listed "
-                "too.");
+    setSubTitle("DualSense: hold Create and PS together until the light bar "
+                "blinks rapidly; paired ones are listed too. Steam "
+                "Controller: plug in its Puck and switch the controller on.");
     setButtonText(QWizard::NextButton, "Add controller");
 
     list_ = new QListWidget(this);
     status_ = wrapped_label("Looking for controllers…", this);
+    claim_hint_ = wrapped_label("Steam Controller not listed? Steam is "
+                                "probably using its Puck.",
+                                this);
+    claim_ = new QPushButton("Take it from Steam", this);
+    auto *claim_row = new QHBoxLayout;
+    claim_row->addWidget(claim_hint_, 1);
+    claim_row->addWidget(claim_);
 
     auto *layout = new QVBoxLayout(this);
     layout->addWidget(list_, 1);
     layout->addWidget(status_);
+    layout->addLayout(claim_row);
+
+    connect(claim_, &QPushButton::clicked, this, [this] {
+      claiming_ = true;
+      claim_->setEnabled(false);
+      claim_hint_->setText("Looking on the Puck. Other programs get it back "
+                           "if you close this window without adding a "
+                           "controller.");
+      refresh();
+    });
 
     connect(list_, &QListWidget::currentRowChanged, this,
             [this] { emit completeChanged(); });
@@ -171,33 +198,41 @@ public:
     if (added_) {
       return true;
     }
-    const BluetoothDevice device =
+    const Candidate candidate =
         candidates_.at(static_cast<std::size_t>(list_->currentRow()));
-    set_busy(true, device.paired ? "Adding the controller…"
-                                 : "Pairing with the controller…");
+    if (!candidate.bluetooth) {
+      set_busy(true, "Adding the controller…");
+      add(candidate.address);
+      return false;
+    }
+    set_busy(true, candidate.bluetooth->paired
+                       ? "Adding the controller…"
+                       : "Pairing with the controller…");
     bluez_.pair_and_trust(
-        device,
-        [this, address = device.address] {
-          client_.send(
-              attach_request({
-                  .address = address,
-                  .profile = ControllerProfile::Unspecified,
-                  .ports = {},
-              }),
-              [this, address](const QByteArray &reply) {
-                (void)parse_attach_reply(reply);
-                added_address_ = address.toLower();
-                added_ = true;
-                set_busy(false, {});
-                wizard()->next();
-              },
-              [this](const QString &error) { set_busy(false, error); });
-        },
+        *candidate.bluetooth,
+        [this, address = candidate.address] { add(address); },
         [this](const QString &error) { set_busy(false, error); });
     return false;
   }
 
 private:
+  void add(const QString &address) {
+    client_.send(
+        attach_request({
+            .address = address,
+            .profile = ControllerProfile::Unspecified,
+            .ports = {},
+        }),
+        [this, address](const QByteArray &reply) {
+          (void)parse_attach_reply(reply);
+          added_address_ = address;
+          added_ = true;
+          set_busy(false, {});
+          wizard()->next();
+        },
+        [this](const QString &error) { set_busy(false, error); });
+  }
+
   void set_busy(bool busy, const QString &status) {
     busy_ = busy;
     list_->setEnabled(!busy);
@@ -213,47 +248,96 @@ private:
           for (const ControllerStatus &controller : parse_list_reply(reply)) {
             registered.insert(controller.address);
           }
-          bluez_.list_devices(
-              [this, registered](std::vector<BluetoothDevice> devices) {
-                std::erase_if(devices, [&](const BluetoothDevice &device) {
-                  return !device.supported_controller ||
-                         registered.contains(device.address.toLower());
-                });
-                show_candidates(std::move(devices));
+          client_.send(
+              local_targets_request(claiming_),
+              [this, registered](const QByteArray &targets) {
+                find_bluetooth(registered, switched_on(targets));
               },
               [this](const QString &error) { status_->setText(error); });
         },
         [this](const QString &error) { status_->setText(error); });
   }
 
-  void show_candidates(std::vector<BluetoothDevice> devices) {
-    bluez_.start_discovery();
+  /* The Steam Controllers that are on and not registered yet. */
+  static std::vector<Candidate> switched_on(const QByteArray &targets) {
+    std::vector<Candidate> found;
+    for (const PairedController &target : parse_list_targets_reply(targets)) {
+      if (target.online && !target.registered) {
+        found.push_back({.address = target.address, .name = target.name});
+      }
+    }
+    return found;
+  }
+
+  /* Without Bluetooth a Steam Controller can still be added. */
+  void find_bluetooth(const QSet<QString> &registered,
+                      const std::vector<Candidate> &found) {
+    bluez_.list_devices(
+        [this, registered, found](std::vector<BluetoothDevice> devices) {
+          std::vector<Candidate> candidates = found;
+          for (const BluetoothDevice &device : devices) {
+            const QString address = device.address.toLower();
+            if (device.supported_controller && !registered.contains(address)) {
+              candidates.push_back({.address = address,
+                                    .name = device.name,
+                                    .bluetooth = device});
+            }
+          }
+          bluez_.start_discovery();
+          show_candidates(std::move(candidates), {});
+        },
+        [this, found](const QString &error) {
+          show_candidates(found, error);
+        });
+  }
+
+  static QString label_of(const Candidate &candidate) {
+    if (!candidate.bluetooth) {
+      return candidate.name + "  " +
+             candidate.address.mid(
+                 static_cast<qsizetype>(kSteamAddressPrefix.size())) +
+             "  (switched on)";
+    }
+    return candidate.name + "  " + candidate.bluetooth->address +
+           (candidate.bluetooth->paired ? "  (paired)" : "  (ready to pair)");
+  }
+
+  void show_candidates(std::vector<Candidate> candidates,
+                       const QString &problem) {
+    if (!problem.isEmpty()) {
+      status_->setText(problem);
+    }
+    const auto paired = [](const Candidate &candidate) {
+      return candidate.bluetooth && candidate.bluetooth->paired;
+    };
     const bool same = std::equal(
-        devices.begin(), devices.end(), candidates_.begin(), candidates_.end(),
-        [](const BluetoothDevice &left, const BluetoothDevice &right) {
-          return left.path == right.path && left.paired == right.paired;
+        candidates.begin(), candidates.end(), candidates_.begin(),
+        candidates_.end(), [&](const Candidate &left, const Candidate &right) {
+          return left.address == right.address && paired(left) == paired(right);
         });
     if (same) {
       return;
     }
     const QString selected =
         list_->currentRow() >= 0
-            ? candidates_.at(static_cast<std::size_t>(list_->currentRow())).path
+            ? candidates_.at(static_cast<std::size_t>(list_->currentRow()))
+                  .address
             : QString();
-    candidates_ = std::move(devices);
+    candidates_ = std::move(candidates);
     list_->clear();
-    for (const BluetoothDevice &device : candidates_) {
-      list_->addItem(device.name + "  " + device.address +
-                     (device.paired ? "  (paired)" : "  (ready to pair)"));
-      if (device.path == selected) {
+    for (const Candidate &candidate : candidates_) {
+      list_->addItem(label_of(candidate));
+      if (candidate.address == selected) {
         list_->setCurrentRow(list_->count() - 1);
       }
     }
     if (list_->currentRow() < 0 && list_->count() == 1) {
       list_->setCurrentRow(0);
     }
-    status_->setText(candidates_.empty() ? "Looking for controllers…"
-                                         : QString());
+    if (problem.isEmpty()) {
+      status_->setText(candidates_.empty() ? "Looking for controllers…"
+                                           : QString());
+    }
     emit completeChanged();
   }
 
@@ -263,7 +347,12 @@ private:
   QTimer timer_;
   QListWidget *list_ = nullptr;
   QLabel *status_ = nullptr;
-  std::vector<BluetoothDevice> candidates_;
+  QLabel *claim_hint_ = nullptr;
+  QPushButton *claim_ = nullptr;
+  std::vector<Candidate> candidates_;
+  /// The user asked to take the Pucks from other programs; every refresh
+  /// renews that until the page is left.
+  bool claiming_ = false;
   bool busy_ = false;
   bool added_ = false;
 };
@@ -287,11 +376,20 @@ public:
   }
 
   void initializePage() override {
-    row_->show_state(false, "Press the PS button on the controller.");
+    row_->show_state(false, waiting_text());
     timer_.start(kRefreshIntervalMs);
   }
 
 private:
+  bool steam() const {
+    return is_steam_address(added_address_.toStdString());
+  }
+
+  QString waiting_text() const {
+    return steam() ? "Switch the Steam Controller on."
+                   : "Press the PS button on the controller.";
+  }
+
   void refresh() {
     client_.send(
         list_request(),
@@ -317,14 +415,16 @@ private:
     }
     explanation_->clear();
     if (controller.connected) {
-      row_->show_state(true, "Connected. Games now see a USB DualSense "
-                             "with haptics, adaptive triggers and audio.");
+      row_->show_state(
+          true, steam() ? "Connected. Games now see a USB DualSense; its "
+                          "haptics and rumble play on the Steam Controller."
+                        : "Connected. Games now see a USB DualSense with "
+                          "haptics, adaptive triggers and audio.");
     } else if (!controller.error.isEmpty()) {
-      row_->show_state(false, "Press the PS button on the controller. "
-                              "The last attempt failed: " +
+      row_->show_state(false, waiting_text() + " The last attempt failed: " +
                                   controller.error);
     } else {
-      row_->show_state(false, "Press the PS button on the controller.");
+      row_->show_state(false, waiting_text());
     }
   }
 

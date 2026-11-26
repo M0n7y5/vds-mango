@@ -81,6 +81,11 @@ inline const QString kKernelRequirement =
 
 QByteArray list_request();
 QByteArray list_targets_request();
+/// The targets vdsd finds without asking bluetoothd: Steam Controllers on
+/// their Puck. Unlike list_targets_request() it is cheap enough to poll.
+/// claim_pucks takes the Pucks from other programs for about 20 s, so a
+/// controller Steam holds shows up in the next reply.
+QByteArray local_targets_request(bool claim_pucks);
 QByteArray attach_request(const ControllerAssignment &assignment);
 QByteArray detach_request(const QString &address);
 QByteArray trace_status_request();

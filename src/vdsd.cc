@@ -103,6 +103,8 @@ constexpr int kInitialFeatureReportPollMs = 5000;
  */
 constexpr const char *kHiddenPadDir = "/run/vds/hidden";
 constexpr const char *kSteamHiddenMarker = "steam";
+/* How long the Pucks stay claimed after the Add wizard last asked. */
+constexpr auto kPuckClaimHold = std::chrono::seconds(20);
 constexpr std::uint8_t kPairingInfoReportId = 0x09;
 constexpr std::size_t kPairingInfoAddressMsbOffset = 6;
 constexpr auto kSharingProbeTimeout = std::chrono::milliseconds(400);
@@ -1715,8 +1717,12 @@ std::vector<VirtualPort> create_virtual_ports() {
 }
 
 void sync_hidden_pad_markers(std::span<const ControllerRuntime> controllers,
-                             bool hide_bluetooth, vds::Logger &logger) {
+                             bool hide_bluetooth, bool claim_pucks,
+                             vds::Logger &logger) {
   std::vector<std::string> wanted;
+  if (claim_pucks) {
+    wanted.emplace_back(kSteamHiddenMarker);
+  }
   for (const auto &controller : controllers) {
     if (vds::is_steam_address(controller.config.address)) {
       wanted.emplace_back(kSteamHiddenMarker);
@@ -2052,13 +2058,16 @@ void attach_steam_pads(std::vector<VirtualPort> &ports,
 }
 
 /*
- * The DualSenses BlueZ knows, and every Steam Controller that is registered
- * or switched on.
+ * Every Steam Controller that is registered or switched on and, with
+ * bluetooth, the DualSenses BlueZ knows.
  */
 std::vector<vds::ControllerTarget>
-list_controller_targets(std::span<const ControllerRuntime> controllers) {
-  std::vector<vds::ControllerTarget> targets =
-      vds::list_bluez_controller_targets();
+list_controller_targets(std::span<const ControllerRuntime> controllers,
+                        bool bluetooth) {
+  std::vector<vds::ControllerTarget> targets;
+  if (bluetooth) {
+    targets = vds::list_bluez_controller_targets();
+  }
   const auto add = [&](std::string address, bool online) {
     const auto known = std::find_if(targets.begin(), targets.end(),
                                     [&](const vds::ControllerTarget &target) {
@@ -2568,6 +2577,7 @@ void handle_control_client(int control_fd, std::span<VirtualPort> ports,
                            const std::string &db_path,
                            std::optional<bool> kernel_fix,
                            std::uint32_t &trace_flags, bool &reload_requested,
+                           Clock::time_point &puck_claim_until,
                            vds::Logger &logger, unsigned &accept_failures) {
   vds::UniqueFd client_fd(
       ::accept4(control_fd, nullptr, nullptr, SOCK_CLOEXEC | SOCK_NONBLOCK));
@@ -2750,7 +2760,12 @@ void handle_control_client(int control_fd, std::span<VirtualPort> ports,
   std::string buzz_address;
   reply = vds::handle_vdsd_control_command(
       command, db_path, controller_statuses, port_statuses,
-      [&] { return list_controller_targets(controllers); },
+      [&](const vds::TargetQuery &query) {
+        if (query.claim_pucks) {
+          puck_claim_until = Clock::now() + kPuckClaimHold;
+        }
+        return list_controller_targets(controllers, query.bluetooth);
+      },
       vds::VdsdControlDaemonStatus{.version = vds::kVersion,
                                    .kernel_fix = kernel_fix},
       trace_flags, reload_requested, buzz_address, logger);
@@ -2919,6 +2934,8 @@ int run_daemon(const Options &options, vds::Logger &logger) {
   unsigned control_accept_failures = 0;
   BluetoothSharing sharing = BluetoothSharing::Unknown;
   bool scan_pads = false;
+  Clock::time_point puck_claim_until{};
+  bool pucks_claimed = false;
   /* Between logind announcing sleep and the resume nothing may plug in. */
   bool asleep = false;
   SignalRequests signals;
@@ -2936,6 +2953,16 @@ int run_daemon(const Options &options, vds::Logger &logger) {
       }
     }
 
+    /*
+     * A Steam Controller another program holds has no input device to be
+     * found by, so the Add wizard asks for the Pucks while it looks.
+     */
+    const bool claim_pucks = Clock::now() < puck_claim_until;
+    if (claim_pucks != pucks_claimed) {
+      pucks_claimed = claim_pucks;
+      reload_requested = true;
+    }
+
     if (reload_requested) {
       try {
         reconcile_controller_configs(ports, controllers, options.db_path,
@@ -2943,13 +2970,14 @@ int run_daemon(const Options &options, vds::Logger &logger) {
         epoll_dirty = true;
         sync_hidden_pad_markers(controllers,
                                 sharing != BluetoothSharing::Unsupported,
-                                logger);
+                                pucks_claimed, logger);
         hide_steam_dongles(
-            std::any_of(controllers.begin(), controllers.end(),
-                        [](const ControllerRuntime &controller) {
-                          return vds::is_steam_address(
-                              controller.config.address);
-                        }),
+            pucks_claimed ||
+                std::any_of(controllers.begin(), controllers.end(),
+                            [](const ControllerRuntime &controller) {
+                              return vds::is_steam_address(
+                                  controller.config.address);
+                            }),
             logger);
         scan_pads = true;
       } catch (const std::exception &error) {
@@ -2973,7 +3001,7 @@ int run_daemon(const Options &options, vds::Logger &logger) {
       attach_bluez_pads(ports, controllers, sharing, logger, epoll_dirty);
       if (was_supported && sharing == BluetoothSharing::Unsupported) {
         /* Let the pads reconnect as plain Bluetooth gamepads meanwhile. */
-        sync_hidden_pad_markers(controllers, false, logger);
+        sync_hidden_pad_markers(controllers, false, pucks_claimed, logger);
         for (const auto &controller : controllers) {
           release_shared_pad(controller.config.address, logger);
         }
@@ -2989,7 +3017,12 @@ int run_daemon(const Options &options, vds::Logger &logger) {
     }
 
     std::array<epoll_event, 64> events{};
-    const int timeout_ms = next_wakeup_timeout_ms(ports, controllers);
+    int timeout_ms = next_wakeup_timeout_ms(ports, controllers);
+    if (pucks_claimed) {
+      const auto left = std::chrono::ceil<std::chrono::milliseconds>(
+          puck_claim_until - Clock::now());
+      timeout_ms = std::clamp(static_cast<int>(left.count()), 0, timeout_ms);
+    }
     const int ready =
         ::epoll_wait(epoll_fd.get(), events.data(),
                      static_cast<int>(events.size()), timeout_ms);
@@ -3024,7 +3057,8 @@ int run_daemon(const Options &options, vds::Logger &logger) {
               sharing == BluetoothSharing::Unknown
                   ? std::nullopt
                   : std::optional(sharing == BluetoothSharing::Supported),
-              trace_flags, reload_requested, logger, control_accept_failures);
+              trace_flags, reload_requested, puck_claim_until, logger,
+              control_accept_failures);
         }
         if ((revents & (EPOLLERR | EPOLLHUP)) != 0) {
           throw std::runtime_error("control socket epoll error");
@@ -3250,7 +3284,7 @@ int run_daemon(const Options &options, vds::Logger &logger) {
   }
 
   logger.log(vds::LogScope::Daemon, vds::LogLevel::Info, "stopping");
-  sync_hidden_pad_markers({}, false, logger);
+  sync_hidden_pad_markers({}, false, false, logger);
   for (const auto &controller : controllers) {
     release_shared_pad(controller.config.address, logger);
   }

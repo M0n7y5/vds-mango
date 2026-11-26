@@ -41,6 +41,9 @@ public:
   /// The controller the last buzz command asked vdsd to vibrate.
   const std::string &buzzed() const { return buzzed_; }
 
+  /// What the last request for targets asked of vdsd.
+  const vds::TargetQuery &target_query() const { return target_query_; }
+
   /// The controller database as vdsd wrote it.
   std::string database() const {
     QFile file(QString::fromStdString(db_path_));
@@ -64,7 +67,8 @@ public:
     bool reload_requested = false;
     const std::string reply = vds::handle_vdsd_control_command(
         vds::trim_command(request.toStdString()), db_path_, statuses_, kPorts,
-        [] {
+        [this](const vds::TargetQuery &query) {
+          target_query_ = query;
           return std::vector<vds::ControllerTarget>{{
               .address = "aa:bb:cc:dd:ee:01",
               .name = "DualSense Wireless Controller",
@@ -87,6 +91,7 @@ private:
   std::vector<vds::VdsdControlControllerStatus> statuses_;
   std::optional<bool> kernel_fix_;
   std::string buzzed_;
+  vds::TargetQuery target_query_;
 };
 
 std::string error_of(Daemon &daemon, const QByteArray &request,
@@ -148,6 +153,34 @@ void test_listed_target_reports_whether_it_is_registered() {
       vds::gui::parse_list_targets_reply(
           daemon.handle(vds::gui::list_targets_request()));
   VDS_CHECK_EQ(after.at(0).registered, true);
+}
+
+void test_plain_target_request_asks_bluetoothd() {
+  Daemon daemon;
+  (void)daemon.handle(vds::gui::local_targets_request(false));
+  (void)daemon.handle(vds::gui::list_targets_request());
+  VDS_CHECK(daemon.target_query().bluetooth);
+}
+
+void test_local_target_request_leaves_bluetoothd_alone() {
+  Daemon daemon;
+  (void)vds::gui::parse_list_targets_reply(
+      daemon.handle(vds::gui::local_targets_request(false)));
+  VDS_CHECK(!daemon.target_query().bluetooth);
+}
+
+void test_local_target_request_leaves_the_pucks_to_other_programs() {
+  Daemon daemon;
+  (void)daemon.handle(vds::gui::local_targets_request(true));
+  (void)daemon.handle(vds::gui::local_targets_request(false));
+  VDS_CHECK(!daemon.target_query().claim_pucks);
+}
+
+void test_claiming_target_request_asks_for_the_pucks() {
+  Daemon daemon;
+  (void)vds::gui::parse_list_targets_reply(
+      daemon.handle(vds::gui::local_targets_request(true)));
+  VDS_CHECK(daemon.target_query().claim_pucks);
 }
 
 void test_unpaired_address_surfaces_the_daemon_error_text() {
@@ -445,6 +478,10 @@ void run_tests() {
   test_daemon_accepts_the_attach_request_and_gui_reads_the_reply();
   test_listed_controller_keeps_the_attached_profile_and_ports();
   test_listed_target_reports_whether_it_is_registered();
+  test_plain_target_request_asks_bluetoothd();
+  test_local_target_request_leaves_bluetoothd_alone();
+  test_local_target_request_leaves_the_pucks_to_other_programs();
+  test_claiming_target_request_asks_for_the_pucks();
   test_unpaired_address_surfaces_the_daemon_error_text();
   test_detaching_an_unregistered_address_surfaces_the_daemon_error_text();
   test_enabled_trace_scope_is_read_back_from_the_status_reply();

@@ -92,12 +92,23 @@ std::vector<VdsdControlPortStatus> build_vdsd_control_port_statuses(
     std::span<const VdsdControlPortCandidate> candidates,
     std::span<const VdsdControlPortBinding> bindings);
 std::string format_control_error_reply(std::string_view error);
+struct TargetQuery {
+  /// False leaves out what only bluetoothd knows, so the daemon does not
+  /// wait on D-Bus.
+  bool bluetooth = true;
+  /// Takes Steam Controller Pucks away from other programs for a while: a
+  /// controller that Steam holds cannot be listed.
+  bool claim_pucks = false;
+};
+/// Lists the controllers that can be registered.
+using ControllerTargetLister =
+    std::function<std::vector<ControllerTarget>(const TargetQuery &query)>;
 /// buzz_address receives the controller a buzz command wants to vibrate.
 std::string handle_vdsd_control_command(
     std::string_view request, const std::string &db_path,
     std::span<const VdsdControlControllerStatus> controllers,
     std::span<const VdsdControlPortStatus> ports,
-    const std::function<std::vector<ControllerTarget>()> &list_targets,
+    const ControllerTargetLister &list_targets,
     const VdsdControlDaemonStatus &daemon, std::uint32_t &trace_flags,
     bool &reload_requested, std::string &buzz_address, Logger &logger);
 
