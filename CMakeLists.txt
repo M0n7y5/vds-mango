@@ -55,6 +55,11 @@ target_include_directories(
                       ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(vds_protocol PRIVATE PkgConfig::OPUS)
 
+add_library(vds_steam OBJECT src/vds_steam.cc)
+target_include_directories(
+  vds_steam PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
+                   ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
 add_library(vds_common OBJECT src/vds_common.cc)
 target_include_directories(vds_common PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
@@ -154,10 +159,18 @@ if(BUILD_TESTS)
   target_link_libraries(test_usbip PRIVATE vds_test_support vds_usbip)
   add_test(NAME usbip COMMAND test_usbip
            WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+
+  add_executable(test_steam tests/test_steam.cc)
+  target_link_libraries(test_steam PRIVATE vds_test_support vds_steam)
+  add_test(NAME steam COMMAND test_steam
+           WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 endif()
 
 add_library(vds_bt OBJECT src/vds_bt.cc)
 target_link_libraries(vds_bt PUBLIC vds_protocol)
+
+add_library(vds_steam_pad OBJECT src/vds_steam_pad.cc)
+target_link_libraries(vds_steam_pad PUBLIC vds_steam)
 
 add_library(vds_bluez OBJECT src/vds_bluez.cc)
 target_include_directories(vds_bluez PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
@@ -181,6 +194,8 @@ target_link_libraries(
           vds_config
           vds_io
           vds_log
+          vds_steam
+          vds_steam_pad
           vds_udev
           vds_usbip
           vdsd_common

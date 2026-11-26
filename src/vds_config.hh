@@ -24,6 +24,8 @@ inline constexpr std::string_view kBluetoothSharingUnsupported =
     "this kernel reads the controller's Bluetooth audio as button presses; "
     "vDS Mango needs a kernel with the DualSense audio fix, such as "
     "linux-cachyos 7.3.6 or newer";
+/// Registers a Steam Controller by its serial number: steam:FXA1234567B89.
+inline constexpr std::string_view kSteamAddressPrefix = "steam:";
 
 enum class ControllerProfile {
   Unspecified,
@@ -53,6 +55,9 @@ struct ConfigDb {
 };
 
 std::string normalize_bluetooth_address(std::string_view address);
+/// A Bluetooth address, or kSteamAddressPrefix and a serial number.
+std::string normalize_controller_address(std::string_view address);
+bool is_steam_address(std::string_view address);
 ControllerProfile parse_controller_profile(std::string_view profile);
 std::string controller_profile_name(ControllerProfile profile);
 /// Accepts only the lengths confirmed to play on a DualSense: 16, 24, 32, 64.

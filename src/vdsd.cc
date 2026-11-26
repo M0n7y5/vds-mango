@@ -52,6 +52,7 @@
 #include "vds_profile.hh"
 #include "vds_protocol.hh"
 #include "vds_sleep.hh"
+#include "vds_steam_pad.hh"
 #include "vds_udev.hh"
 #include "vds_usbip.hh"
 #include "vdsd_common.hh"
@@ -96,10 +97,12 @@ constexpr auto kSleepUnplugWait = std::chrono::milliseconds(1000);
 constexpr auto kSleepUnplugPoll = std::chrono::milliseconds(5);
 constexpr int kInitialFeatureReportPollMs = 5000;
 /*
- * A controller listed here is hidden from every program but vdsd when BlueZ
- * connects it; 72-vds-dualsense-hide.rules tests for the file.
+ * What is listed here is hidden from every program but vdsd by
+ * 72-vds-dualsense-hide.rules: a Bluetooth controller by its address, and
+ * every Steam Controller dongle by kSteamHiddenMarker.
  */
 constexpr const char *kHiddenPadDir = "/run/vds/hidden";
+constexpr const char *kSteamHiddenMarker = "steam";
 constexpr std::uint8_t kPairingInfoReportId = 0x09;
 constexpr std::size_t kPairingInfoAddressMsbOffset = 6;
 constexpr auto kSharingProbeTimeout = std::chrono::milliseconds(400);
@@ -246,10 +249,13 @@ struct ControllerRuntime {
   std::string device;
   std::optional<std::uint32_t> detected_profile;
   std::optional<vds::BtBackend> backend;
+  std::optional<vds::SteamBackend> steam;
   bool virtual_connected = false;
   std::string last_error;
   /* BlueZ was asked to drop the pad so it reconnects hidden. */
   bool bluez_kicked = false;
+  /* A Steam Controller that failed stays alone until it switches off. */
+  bool steam_failed = false;
 };
 
 /* Whether BlueZ and vdsd can both drive a pad on this kernel. */
@@ -264,6 +270,7 @@ enum class EventType : std::uint32_t {
   Signal = 8,
   Usb = 9,
   Sleep = 10,
+  SteamInput = 11,
 };
 
 struct EventSource {
@@ -539,6 +546,18 @@ bool write_vds_frame(VirtualPort &port, std::span<const std::uint8_t> bytes,
     }
     throw PortIoError("write failed: " + std::string(std::strerror(errno)));
   }
+}
+
+bool write_input_report(VirtualPort &port, const vds::UsbInputReport &report,
+                        bool trace, vds::Logger &logger) {
+  vds_frame_header header{};
+  header.type = VDS_FRAME_USB_HID_IN;
+  header.length = static_cast<std::uint32_t>(report.size());
+
+  std::array<std::uint8_t, sizeof(header) + vds::kUsbInputReportSize> frame{};
+  std::memcpy(frame.data(), &header, sizeof(header));
+  std::memcpy(frame.data() + sizeof(header), report.data(), report.size());
+  return write_vds_frame(port, frame, trace, logger);
 }
 
 /*
@@ -1162,8 +1181,74 @@ void handle_frame(const vds_frame_header &header,
   }
 }
 
+/*
+ * Behind a Steam Controller no DualSense answers, so nothing is forwarded:
+ * the feature reports are made up when it connects, and one the host asks
+ * for beyond those is answered with zeros. Left unanswered it would stall
+ * the host for the five seconds the virtual port waits.
+ */
+void handle_steam_frame(const vds_frame_header &header,
+                        std::span<const std::uint8_t> payload,
+                        vds::SteamBackend &steam, VirtualPort &port,
+                        vds::Logger &logger) {
+  const auto now = Clock::now();
+  if (header.type == VDS_FRAME_USB_INTERFACE) {
+    vds_usb_interface_event event{};
+    if (payload.size() != sizeof(event)) {
+      return;
+    }
+    std::memcpy(&event, payload.data(), sizeof(event));
+    if (event.interface_type == VDS_USB_INTERFACE_AUDIO_OUT) {
+      port.audio_out_stream_active = event.altsetting != 0;
+      logger.log(vds::LogScope::Usb, vds::LogLevel::Info,
+                 port.path + " audio out stream=" +
+                     (port.audio_out_stream_active ? "on" : "off"));
+    }
+  } else if (header.type == VDS_FRAME_USB_HID_OUT) {
+    steam.apply_usb_output_report(payload, now);
+  } else if (header.type == VDS_FRAME_USB_FEATURE_GET) {
+    if (payload.empty()) {
+      return;
+    }
+    const std::uint8_t report_id = payload[0];
+    if (port.feature_cached[report_id]) {
+      const auto frame = vds::frame_bytes(VDS_FRAME_USB_FEATURE_REPLY,
+                                          port.feature_cache[report_id]);
+      (void)write_vds_frame(port, frame, false, logger);
+      return;
+    }
+    const std::size_t asked =
+        payload.size() >= 3
+            ? payload[1] | (static_cast<std::size_t>(payload[2]) << 8)
+            : vds::kUsbInputReportSize;
+    std::vector<std::uint8_t> blank(
+        std::clamp<std::size_t>(asked, 1, vds::kUsbInputReportSize), 0);
+    blank[0] = report_id;
+    logger.log(vds::LogScope::Hid, vds::LogLevel::Warn,
+               port.path + " host asked for feature report " +
+                   hex_u8(report_id) +
+                   ", which a Steam Controller has no answer to; replied "
+                   "with zeros");
+    cache_feature_report(port, blank, false, logger);
+  } else if (header.type == VDS_FRAME_USB_AUDIO_OUT) {
+    steam.push_usb_audio(payload, now);
+  }
+}
+
+bool handle_steam_input(VirtualPort &port, vds::SteamBackend &steam,
+                        vds::Logger &logger) {
+  const auto report = steam.read_input();
+  if (!report) {
+    return false;
+  }
+  port.battery = steam.battery();
+  (void)write_input_report(port, *report, false, logger);
+  return true;
+}
+
 bool handle_vds_frame(VirtualPort &port, vds::BtBackend *bt_backend,
-                      std::uint32_t trace_flags, vds::Logger &logger) {
+                      vds::SteamBackend *steam, std::uint32_t trace_flags,
+                      vds::Logger &logger) {
   std::array<std::uint8_t, sizeof(vds_frame_header) + VDS_FRAME_MAX_PAYLOAD>
       frame;
   const ssize_t got = ::read(port.usb->frame_fd(), frame.data(), frame.size());
@@ -1189,7 +1274,11 @@ bool handle_vds_frame(VirtualPort &port, vds::BtBackend *bt_backend,
     throw PortIoError(port.path + " short VDS frame payload");
   }
   const std::span payload(frame.data() + sizeof(header), header.length);
-  handle_frame(header, payload, bt_backend, trace_flags, port, logger);
+  if (steam) {
+    handle_steam_frame(header, payload, *steam, port, logger);
+  } else {
+    handle_frame(header, payload, bt_backend, trace_flags, port, logger);
+  }
   return true;
 }
 
@@ -1352,17 +1441,8 @@ bool handle_bt_input(VirtualPort &port, vds::BtBackend &bt_backend,
             std::string(port.headset_mic_plugged ? "plugged" : "unplugged"));
   }
 
-  vds_frame_header header{};
-  header.type = VDS_FRAME_USB_HID_IN;
-  header.length = static_cast<std::uint32_t>(report->size());
-
-  std::array<std::uint8_t, sizeof(header) + vds::kUsbInputReportSize> frame{};
-  std::memcpy(frame.data(), &header, sizeof(header));
-  std::memcpy(frame.data() + sizeof(header), report->data(), report->size());
-  const std::span bytes(frame.data(), sizeof(header) + report->size());
-
   const auto write_start = Clock::now();
-  const bool wrote = write_vds_frame(port, bytes, input_trace, logger);
+  const bool wrote = write_input_report(port, *report, input_trace, logger);
   const auto write_duration = Clock::now() - write_start;
   if (input_trace) {
     const auto write_us = static_cast<std::uint64_t>(
@@ -1515,7 +1595,8 @@ std::vector<unsigned> present_port_indices(std::span<const VirtualPort> ports) {
 }
 
 bool controller_uses_port(const ControllerRuntime &controller) {
-  return controller.backend || controller.virtual_connected;
+  return controller.backend || controller.steam ||
+         controller.virtual_connected;
 }
 
 bool port_used_by_other_controller(
@@ -1579,9 +1660,36 @@ controller_for_port(std::vector<ControllerRuntime> &controllers,
   return nullptr;
 }
 
-void drop_bt_backend(ControllerRuntime &controller, VirtualPort &port,
-                     const std::string &reason, vds::Logger &logger) {
-  if (!controller.backend && !controller.virtual_connected) {
+/*
+ * The port the controller had while that is still free, else the next one
+ * its configuration allows.
+ */
+std::optional<std::size_t>
+claim_port_index(std::span<const VirtualPort> ports,
+                 std::span<const ControllerRuntime> controllers,
+                 ControllerRuntime &controller) {
+  std::optional<std::size_t> port_index;
+  if (!controller.device.empty()) {
+    port_index = find_port_index(ports, controller.device);
+    if (port_index && port_used_by_other_controller(controllers, controller,
+                                                    controller.device)) {
+      port_index.reset();
+    }
+  }
+  if (!port_index) {
+    port_index = available_port_index(ports, controllers, controller);
+    if (!port_index) {
+      controller.last_error = "no available virtual port";
+      return std::nullopt;
+    }
+    controller.device = ports[*port_index].path;
+  }
+  return port_index;
+}
+
+void drop_backend(ControllerRuntime &controller, VirtualPort &port,
+                  const std::string &reason, vds::Logger &logger) {
+  if (!controller_uses_port(controller)) {
     return;
   }
 
@@ -1591,6 +1699,7 @@ void drop_bt_backend(ControllerRuntime &controller, VirtualPort &port,
              "backend disconnected address=" + controller.config.address +
                  " device=" + controller.device + " reason=" + reason);
   controller.backend.reset();
+  controller.steam.reset();
   controller.virtual_connected = false;
   controller.device.clear();
   disconnect_virtual_port(port, logger);
@@ -1606,29 +1715,50 @@ std::vector<VirtualPort> create_virtual_ports() {
 }
 
 void sync_hidden_pad_markers(std::span<const ControllerRuntime> controllers,
-                             vds::Logger &logger) {
+                             bool hide_bluetooth, vds::Logger &logger) {
+  std::vector<std::string> wanted;
+  for (const auto &controller : controllers) {
+    if (vds::is_steam_address(controller.config.address)) {
+      wanted.emplace_back(kSteamHiddenMarker);
+    } else if (hide_bluetooth) {
+      wanted.push_back(controller.config.address);
+    }
+  }
+
   std::error_code error;
   std::filesystem::create_directories(kHiddenPadDir, error);
   for (const auto &entry :
        std::filesystem::directory_iterator(kHiddenPadDir, error)) {
-    const std::string address = entry.path().filename().string();
-    if (std::none_of(controllers.begin(), controllers.end(),
-                     [&](const ControllerRuntime &controller) {
-                       return controller.config.address == address;
-                     })) {
+    if (std::find(wanted.begin(), wanted.end(),
+                  entry.path().filename().string()) == wanted.end()) {
       std::filesystem::remove(entry.path(), error);
     }
   }
-  for (const auto &controller : controllers) {
-    const auto marker =
-        std::filesystem::path(kHiddenPadDir) / controller.config.address;
+  for (const auto &name : wanted) {
+    const auto marker = std::filesystem::path(kHiddenPadDir) / name;
     if (!std::filesystem::exists(marker, error) &&
         !std::ofstream(marker).good()) {
       logger.log(vds::LogScope::Bluetooth, vds::LogLevel::Warn,
                  "cannot create " + marker.string() +
-                     "; a controller BlueZ connects stays visible to other "
+                     "; a registered controller stays visible to other "
                      "programs");
     }
+  }
+}
+
+/*
+ * The rule only decides the access of a new node: a program keeps a dongle
+ * it opened before the marker existed, and a hidden dongle stays hidden
+ * after the marker is gone.
+ */
+void hide_steam_dongles(bool hidden, vds::Logger &logger) {
+  const unsigned nodes = vds::recreate_steam_dongle_nodes(hidden);
+  if (nodes > 0) {
+    logger.log(vds::LogScope::Hid, vds::LogLevel::Info,
+               "made " + std::to_string(nodes) +
+                   " Steam Controller dongle nodes anew to " +
+                   (hidden ? "hide them from" : "give them back to") +
+                   " other programs");
   }
 }
 
@@ -1764,7 +1894,8 @@ void attach_bluez_pads(std::vector<VirtualPort> &ports,
                        BluetoothSharing &sharing, vds::Logger &logger,
                        bool &epoll_dirty) {
   for (auto &controller : controllers) {
-    if (controller_uses_port(controller)) {
+    if (controller_uses_port(controller) ||
+        vds::is_steam_address(controller.config.address)) {
       continue;
     }
     const auto pad = vds::find_bluez_hid_pad(controller.config.address);
@@ -1806,21 +1937,9 @@ void attach_bluez_pads(std::vector<VirtualPort> &ports,
       continue;
     }
 
-    std::optional<std::size_t> port_index;
-    if (!controller.device.empty()) {
-      port_index = find_port_index(ports, controller.device);
-      if (port_index && port_used_by_other_controller(controllers, controller,
-                                                      controller.device)) {
-        port_index.reset();
-      }
-    }
+    const auto port_index = claim_port_index(ports, controllers, controller);
     if (!port_index) {
-      port_index = available_port_index(ports, controllers, controller);
-      if (!port_index) {
-        controller.last_error = "no available virtual port";
-        continue;
-      }
-      controller.device = ports[*port_index].path;
+      continue;
     }
 
     try {
@@ -1837,6 +1956,134 @@ void attach_bluez_pads(std::vector<VirtualPort> &ports,
                      " node=" + pad->hidraw + " error=" + error.what());
     }
   }
+}
+
+void complete_steam_controller(ControllerRuntime &controller,
+                               VirtualPort &port, const vds::SteamPad &pad,
+                               vds::Logger &logger) {
+  vds::UniqueFd hidraw_fd(
+      ::open(pad.hidraw.c_str(), O_RDWR | O_NONBLOCK | O_CLOEXEC));
+  if (!hidraw_fd) {
+    throw std::runtime_error("failed to open " + pad.hidraw + ": " +
+                             std::strerror(errno));
+  }
+  vds::SteamBackend candidate(std::move(hidraw_fd), Clock::now());
+
+  reset_virtual_port(port);
+  port.usb->disconnect();
+  for (const auto &report : vds::steam_virtual_feature_reports(pad.serial)) {
+    cache_feature_report(port, report, false, logger);
+  }
+  controller.steam.emplace(std::move(candidate));
+  /* The made-up feature reports are those of a plain DualSense. */
+  controller.detected_profile = VDS_PROFILE_DS5;
+  port.usb->connect(VDS_PROFILE_DS5);
+  controller.virtual_connected = true;
+  controller.last_error.clear();
+
+  logger.log(vds::LogScope::Hid, vds::LogLevel::Info,
+             "Steam Controller connected address=" +
+                 controller.config.address + " device=" + port.path +
+                 " node=" + pad.hidraw);
+}
+
+/* Attaches registered Steam Controllers that are switched on. */
+void attach_steam_pads(std::vector<VirtualPort> &ports,
+                       std::vector<ControllerRuntime> &controllers,
+                       vds::Logger &logger, bool &epoll_dirty) {
+  const auto is_steam = [](const ControllerRuntime &controller) {
+    return vds::is_steam_address(controller.config.address);
+  };
+  if (std::none_of(controllers.begin(), controllers.end(), is_steam)) {
+    return;
+  }
+  const std::vector<vds::SteamPad> pads = vds::find_steam_pads();
+  for (auto &controller : controllers) {
+    if (!is_steam(controller) || controller_uses_port(controller)) {
+      continue;
+    }
+    const std::string_view serial =
+        std::string_view(controller.config.address)
+            .substr(vds::kSteamAddressPrefix.size());
+    const auto pad = std::find_if(pads.begin(), pads.end(),
+                                  [&](const vds::SteamPad &candidate) {
+                                    return candidate.serial == serial;
+                                  });
+    if (pad == pads.end()) {
+      controller.steam_failed = false;
+      continue;
+    }
+    if (!pad->hidden) {
+      constexpr std::string_view kNotHidden =
+          "the Steam Controller is not hidden from other programs; is "
+          "72-vds-dualsense-hide.rules installed?";
+      if (controller.last_error != kNotHidden) {
+        logger.log(vds::LogScope::Hid, vds::LogLevel::Error,
+                   "address=" + controller.config.address + " " +
+                       std::string(kNotHidden));
+      }
+      controller.last_error = kNotHidden;
+      continue;
+    }
+    if (controller.steam_failed) {
+      continue;
+    }
+    const auto port_index = claim_port_index(ports, controllers, controller);
+    if (!port_index) {
+      continue;
+    }
+
+    try {
+      complete_steam_controller(controller, ports[*port_index], *pad, logger);
+      epoll_dirty = true;
+    } catch (const std::exception &error) {
+      controller.steam.reset();
+      controller.virtual_connected = false;
+      controller.device.clear();
+      controller.last_error = error.what();
+      /* Closing the node brings the kernel's gamepad back, as a new one. */
+      controller.steam_failed = true;
+      logger.log(vds::LogScope::Hid, vds::LogLevel::Error,
+                 "connect failed address=" + controller.config.address +
+                     " node=" + pad->hidraw + " error=" + error.what());
+    }
+  }
+}
+
+/*
+ * The DualSenses BlueZ knows, and every Steam Controller that is registered
+ * or switched on.
+ */
+std::vector<vds::ControllerTarget>
+list_controller_targets(std::span<const ControllerRuntime> controllers) {
+  std::vector<vds::ControllerTarget> targets =
+      vds::list_bluez_controller_targets();
+  const auto add = [&](std::string address, bool online) {
+    const auto known = std::find_if(targets.begin(), targets.end(),
+                                    [&](const vds::ControllerTarget &target) {
+                                      return target.address == address;
+                                    });
+    if (known != targets.end()) {
+      known->online |= online;
+      return;
+    }
+    targets.push_back(vds::ControllerTarget{
+        .address = std::move(address),
+        .name = "Steam Controller",
+        .profile = vds::ControllerProfile::Unspecified,
+        .online = online,
+        .trusted = true,
+    });
+  };
+  for (const auto &controller : controllers) {
+    if (vds::is_steam_address(controller.config.address)) {
+      add(controller.config.address, controller.steam.has_value());
+    }
+  }
+  for (const auto &pad : vds::find_steam_pads()) {
+    add(std::string(vds::kSteamAddressPrefix) + pad.serial, true);
+  }
+  return targets;
 }
 
 bool has_pending_bt_output(std::span<const VirtualPort> ports,
@@ -1865,6 +2112,16 @@ int next_wakeup_timeout_ms(std::span<const VirtualPort> ports,
     timeout_ms = std::min(timeout_ms, kPendingOutputPollMs);
   }
   for (const auto &controller : controllers) {
+    if (controller.steam) {
+      const auto due = controller.steam->next_due();
+      if (due <= now) {
+        return 0;
+      }
+      const auto wait =
+          std::chrono::ceil<std::chrono::milliseconds>(due - now);
+      timeout_ms = std::min(timeout_ms, static_cast<int>(wait.count()));
+      continue;
+    }
     if (!controller.backend) {
       continue;
     }
@@ -2055,11 +2312,56 @@ void enqueue_speaker_waveout_chunk(VirtualPort &port, std::uint32_t trace_flags,
   }
 }
 
+void service_steam_controller(ControllerRuntime &controller,
+                              std::vector<VirtualPort> &ports,
+                              vds::Logger &logger, bool &epoll_dirty) {
+  const auto port_index = find_port_index(ports, controller.device);
+  if (!port_index) {
+    controller.steam.reset();
+    controller.virtual_connected = false;
+    controller.device.clear();
+    epoll_dirty = true;
+    return;
+  }
+  auto &port = ports[*port_index];
+  vds::SteamBackend &steam = *controller.steam;
+  try {
+    const auto now = Clock::now();
+    if (port.test_buzz_frames_left > 0 && steam.wants_audio()) {
+      const PcmWindow pcm =
+          sine_window(vds::kSpeakerChannels, kTestBuzzPeriodFrames,
+                      kTestBuzzAmplitude, port.test_buzz_phase);
+      port.test_buzz_frames_left -=
+          std::min(port.test_buzz_frames_left,
+                   static_cast<std::uint32_t>(vds::kPcmWindowFrames));
+      steam.push_usb_audio(pcm, now);
+    }
+    const bool was_streaming = steam.streaming();
+    (void)steam.service(now);
+    if (was_streaming && !steam.streaming()) {
+      const auto &stats = steam.stream_stats();
+      logger.log(vds::LogScope::Output, vds::LogLevel::Info,
+                 port.path + " haptics stream ended packets=" +
+                     std::to_string(stats.packets) +
+                     " starved=" + std::to_string(stats.starved) +
+                     " faults=" + std::to_string(stats.faults) +
+                     " status=" + hex_u8(stats.status));
+    }
+  } catch (const vds::SteamLinkError &error) {
+    drop_backend(controller, port, error.what(), logger);
+    epoll_dirty = true;
+  }
+}
+
 void flush_pending_outputs(std::vector<VirtualPort> &ports,
                            std::vector<ControllerRuntime> &controllers,
                            std::uint32_t trace_flags, vds::Logger &logger,
                            bool &epoll_dirty) {
   for (auto &controller : controllers) {
+    if (controller.steam) {
+      service_steam_controller(controller, ports, logger, epoll_dirty);
+      continue;
+    }
     if (!controller.backend) {
       continue;
     }
@@ -2086,7 +2388,7 @@ void flush_pending_outputs(std::vector<VirtualPort> &ports,
                                       controller.config.audio_buffer_length,
                                       logger);
     } catch (const vds::BluetoothLinkError &error) {
-      drop_bt_backend(controller, ports[*port_index], error.what(), logger);
+      drop_backend(controller, ports[*port_index], error.what(), logger);
       epoll_dirty = true;
     }
   }
@@ -2097,6 +2399,9 @@ void flush_pending_outputs(std::vector<VirtualPort> &ports,
  * of it. Only a reconnect gives it back to other programs.
  */
 void release_shared_pad(const std::string &address, vds::Logger &logger) {
+  if (vds::is_steam_address(address)) {
+    return;
+  }
   const auto pad = vds::find_bluez_hid_pad(address);
   if (!pad || !pad->hidden) {
     return;
@@ -2136,9 +2441,11 @@ void reconcile_controller_configs(std::vector<VirtualPort> &ports,
         .device = {},
         .detected_profile = std::nullopt,
         .backend = std::nullopt,
+        .steam = std::nullopt,
         .virtual_connected = false,
         .last_error = {},
         .bluez_kicked = false,
+        .steam_failed = false,
     };
 
     for (std::size_t old_index = 0; old_index < controllers.size();
@@ -2162,9 +2469,11 @@ void reconcile_controller_configs(std::vector<VirtualPort> &ports,
       next.detected_profile = old.detected_profile;
       next.last_error = std::move(old.last_error);
       next.bluez_kicked = old.bluez_kicked;
+      next.steam_failed = old.steam_failed;
       if (old_uses_port && old_device_available) {
         next.device = std::move(old.device);
         next.backend = std::move(old.backend);
+        next.steam = std::move(old.steam);
         next.virtual_connected = old.virtual_connected;
         active_devices.push_back(next.device);
       } else if (old_uses_port) {
@@ -2178,6 +2487,7 @@ void reconcile_controller_configs(std::vector<VirtualPort> &ports,
                          " device=" + old.device);
         }
         old.backend.reset();
+        old.steam.reset();
         release_shared_pad(old.config.address, logger);
         old.virtual_connected = false;
         old.device.clear();
@@ -2372,8 +2682,10 @@ void handle_control_client(int control_fd, std::span<VirtualPort> ports,
                                 ? find_port_index(ports, controller.device)
                                 : std::nullopt;
     const VirtualPort *port = port_index ? &ports[*port_index] : nullptr;
+    /* A Steam Controller's firmware report is made up and says nothing. */
     const auto firmware =
-        port && port->feature_cached[vds::kFirmwareInfoReportId]
+        port && !controller.steam &&
+                port->feature_cached[vds::kFirmwareInfoReportId]
             ? vds::usb_firmware_info(
                   port->feature_cache[vds::kFirmwareInfoReportId])
             : std::nullopt;
@@ -2434,7 +2746,7 @@ void handle_control_client(int control_fd, std::span<VirtualPort> ports,
   std::string buzz_address;
   reply = vds::handle_vdsd_control_command(
       command, db_path, controller_statuses, port_statuses,
-      [] { return vds::list_bluez_controller_targets(); },
+      [&] { return list_controller_targets(controllers); },
       vds::VdsdControlDaemonStatus{.version = vds::kVersion,
                                    .kernel_fix = kernel_fix},
       trace_flags, reload_requested, buzz_address, logger);
@@ -2494,6 +2806,10 @@ vds::UniqueFd rebuild_epoll(int control_fd, int signal_fd,
     add_epoll_fd(epoll_fd.get(), ports[i].usb->poll_fd(), EventType::Usb, i);
   }
   for (std::size_t i = 0; i < controllers.size(); ++i) {
+    if (controllers[i].steam) {
+      add_epoll_fd(epoll_fd.get(), controllers[i].steam->hidraw_fd(),
+                   EventType::SteamInput, i);
+    }
     if (!controllers[i].backend) {
       continue;
     }
@@ -2529,8 +2845,8 @@ void unplug_for_sleep(std::vector<VirtualPort> &ports,
                       vds::Logger &logger) {
   for (auto &controller : controllers) {
     if (const auto port_index = find_port_index(ports, controller.device)) {
-      drop_bt_backend(controller, ports[*port_index],
-                      "the system is going to sleep", logger);
+      drop_backend(controller, ports[*port_index],
+                   "the system is going to sleep", logger);
     }
   }
   const auto deadline = Clock::now() + kSleepUnplugWait;
@@ -2598,7 +2914,7 @@ int run_daemon(const Options &options, vds::Logger &logger) {
   bool first_reload = true;
   unsigned control_accept_failures = 0;
   BluetoothSharing sharing = BluetoothSharing::Unknown;
-  bool scan_bluez_pads = false;
+  bool scan_pads = false;
   /* Between logind announcing sleep and the resume nothing may plug in. */
   bool asleep = false;
   SignalRequests signals;
@@ -2621,10 +2937,17 @@ int run_daemon(const Options &options, vds::Logger &logger) {
         reconcile_controller_configs(ports, controllers, options.db_path,
                                      logger);
         epoll_dirty = true;
-        if (sharing != BluetoothSharing::Unsupported) {
-          sync_hidden_pad_markers(controllers, logger);
-        }
-        scan_bluez_pads = true;
+        sync_hidden_pad_markers(controllers,
+                                sharing != BluetoothSharing::Unsupported,
+                                logger);
+        hide_steam_dongles(
+            std::any_of(controllers.begin(), controllers.end(),
+                        [](const ControllerRuntime &controller) {
+                          return vds::is_steam_address(
+                              controller.config.address);
+                        }),
+            logger);
+        scan_pads = true;
       } catch (const std::exception &error) {
         /* Starting with no usable state is a setup failure, not a reload. */
         if (first_reload) {
@@ -2640,17 +2963,18 @@ int run_daemon(const Options &options, vds::Logger &logger) {
       first_reload = false;
     }
 
-    if (scan_bluez_pads && !asleep) {
-      scan_bluez_pads = false;
+    if (scan_pads && !asleep) {
+      scan_pads = false;
       const bool was_supported = sharing != BluetoothSharing::Unsupported;
       attach_bluez_pads(ports, controllers, sharing, logger, epoll_dirty);
       if (was_supported && sharing == BluetoothSharing::Unsupported) {
         /* Let the pads reconnect as plain Bluetooth gamepads meanwhile. */
-        sync_hidden_pad_markers({}, logger);
+        sync_hidden_pad_markers(controllers, false, logger);
         for (const auto &controller : controllers) {
           release_shared_pad(controller.config.address, logger);
         }
       }
+      attach_steam_pads(ports, controllers, logger, epoll_dirty);
     }
 
     if (epoll_dirty || !epoll_fd) {
@@ -2706,7 +3030,7 @@ int run_daemon(const Options &options, vds::Logger &logger) {
 
       if (source.type == EventType::Udev) {
         if ((revents & EPOLLIN) != 0) {
-          scan_bluez_pads = input_monitor.drain() || scan_bluez_pads;
+          scan_pads = input_monitor.drain() || scan_pads;
         }
         if ((revents & (EPOLLERR | EPOLLHUP)) != 0) {
           throw std::runtime_error("udev monitor epoll error");
@@ -2725,7 +3049,7 @@ int run_daemon(const Options &options, vds::Logger &logger) {
             asleep = false;
             logger.log(vds::LogScope::Daemon, vds::LogLevel::Info,
                        "resumed from sleep");
-            scan_bluez_pads = true;
+            scan_pads = true;
           }
         } catch (const std::exception &error) {
           logger.log(vds::LogScope::Daemon, vds::LogLevel::Error,
@@ -2755,7 +3079,8 @@ int run_daemon(const Options &options, vds::Logger &logger) {
           /* Let go of the pad as well, so pressing PS starts over. */
           release_shared_pad(controller->config.address, logger);
           controller->last_error = error.what();
-          drop_bt_backend(*controller, port, error.what(), logger);
+          controller->steam_failed = controller->steam.has_value();
+          drop_backend(*controller, port, error.what(), logger);
           epoll_dirty = true;
         }
         continue;
@@ -2771,17 +3096,25 @@ int run_daemon(const Options &options, vds::Logger &logger) {
         vds::BtBackend *backend = controller && controller->backend
                                            ? &*controller->backend
                                            : nullptr;
+        vds::SteamBackend *steam = controller && controller->steam
+                                       ? &*controller->steam
+                                       : nullptr;
         if ((revents & EPOLLIN) != 0) {
           for (int frame = 0; frame < kMaxPortFramesPerWake; ++frame) {
             try {
-              if (!handle_vds_frame(port, backend, trace_flags, logger)) {
+              if (!handle_vds_frame(port, backend, steam, trace_flags,
+                                    logger)) {
                 break;
               }
             } catch (const vds::BluetoothLinkError &error) {
               if (!controller) {
                 throw;
               }
-              drop_bt_backend(*controller, port, error.what(), logger);
+              drop_backend(*controller, port, error.what(), logger);
+              epoll_dirty = true;
+              break;
+            } catch (const vds::SteamLinkError &error) {
+              drop_backend(*controller, port, error.what(), logger);
               epoll_dirty = true;
               break;
             } catch (const PortIoError &error) {
@@ -2796,6 +3129,40 @@ int run_daemon(const Options &options, vds::Logger &logger) {
         if ((revents & (EPOLLERR | EPOLLHUP)) != 0) {
           logger.log(vds::LogScope::Port, vds::LogLevel::Error,
                      port.path + " epoll error; reloading ports");
+          reload_requested = true;
+          epoll_dirty = true;
+        }
+        continue;
+      }
+
+      if (source.type == EventType::SteamInput) {
+        if (source.index >= controllers.size() ||
+            !controllers[source.index].steam) {
+          continue;
+        }
+        auto &controller = controllers[source.index];
+        const auto port_index = find_port_index(ports, controller.device);
+        if (!port_index) {
+          continue;
+        }
+        auto &port = ports[*port_index];
+        try {
+          for (int packet = 0; packet < kMaxBtPacketsPerWake; ++packet) {
+            if (!handle_steam_input(port, *controller.steam, logger)) {
+              break;
+            }
+          }
+          if ((revents & (EPOLLERR | EPOLLHUP)) != 0) {
+            drop_backend(controller, port, "Steam Controller dongle unplugged",
+                         logger);
+            epoll_dirty = true;
+          }
+        } catch (const vds::SteamLinkError &error) {
+          drop_backend(controller, port, error.what(), logger);
+          epoll_dirty = true;
+        } catch (const PortIoError &error) {
+          logger.log(vds::LogScope::Port, vds::LogLevel::Error,
+                     std::string(error.what()) + "; reloading ports");
           reload_requested = true;
           epoll_dirty = true;
         }
@@ -2825,7 +3192,7 @@ int run_daemon(const Options &options, vds::Logger &logger) {
                 break;
               }
             } catch (const vds::BluetoothLinkError &error) {
-              drop_bt_backend(controller, port, error.what(), logger);
+              drop_backend(controller, port, error.what(), logger);
               epoll_dirty = true;
               break;
             } catch (const PortIoError &error) {
@@ -2838,8 +3205,8 @@ int run_daemon(const Options &options, vds::Logger &logger) {
           }
         }
         if ((revents & (EPOLLERR | EPOLLHUP)) != 0) {
-          drop_bt_backend(controller, port,
-                          "Bluetooth feature reply epoll error", logger);
+          drop_backend(controller, port,
+                       "Bluetooth feature reply epoll error", logger);
           epoll_dirty = true;
         }
         continue;
@@ -2854,7 +3221,7 @@ int run_daemon(const Options &options, vds::Logger &logger) {
                 break;
               }
             } catch (const vds::BluetoothLinkError &error) {
-              drop_bt_backend(controller, port, error.what(), logger);
+              drop_backend(controller, port, error.what(), logger);
               epoll_dirty = true;
               break;
             } catch (const PortIoError &error) {
@@ -2867,8 +3234,8 @@ int run_daemon(const Options &options, vds::Logger &logger) {
           }
         }
         if ((revents & (EPOLLERR | EPOLLHUP)) != 0) {
-          drop_bt_backend(controller, port,
-                          "Bluetooth interrupt channel epoll error", logger);
+          drop_backend(controller, port,
+                       "Bluetooth interrupt channel epoll error", logger);
           epoll_dirty = true;
         }
       }
@@ -2879,11 +3246,12 @@ int run_daemon(const Options &options, vds::Logger &logger) {
   }
 
   logger.log(vds::LogScope::Daemon, vds::LogLevel::Info, "stopping");
-  sync_hidden_pad_markers({}, logger);
+  sync_hidden_pad_markers({}, false, logger);
   for (const auto &controller : controllers) {
     release_shared_pad(controller.config.address, logger);
   }
   disconnect_all(ports, controllers, logger);
+  hide_steam_dongles(false, logger);
   return 0;
 }
 

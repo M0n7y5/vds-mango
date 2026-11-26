@@ -408,7 +408,7 @@ std::string handle_attach_control_request(
   bool updated = false;
   const bool has_audio_buffer = has_jsonl_field(fields, "audio_buffer");
   try {
-    const std::string address = normalize_bluetooth_address(
+    const std::string address = normalize_controller_address(
         require_jsonl_string(fields, "address", context));
 
     static constexpr std::string_view expected[] = {
@@ -476,7 +476,7 @@ std::string handle_detach_control_request(std::span<const JsonlField> fields,
   std::string address;
   bool removed = false;
   try {
-    address = normalize_bluetooth_address(
+    address = normalize_controller_address(
         require_jsonl_string(fields, "address", context));
     const ConfigDb current_db = load_config_db(db_path);
     if (find_controller_config_by_address(current_db, address) == nullptr) {
@@ -601,7 +601,7 @@ std::string handle_buzz_control_request(
   try {
     static constexpr std::string_view expected[] = {"command", "address"};
     reject_unknown_jsonl_fields(fields, expected, context);
-    address = normalize_bluetooth_address(
+    address = normalize_controller_address(
         require_jsonl_string(fields, "address", context));
     const auto controller = std::find_if(
         controllers.begin(), controllers.end(),

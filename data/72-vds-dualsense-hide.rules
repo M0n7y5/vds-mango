@@ -9,3 +9,10 @@
 ACTION!="remove", KERNEL=="hidraw*", KERNELS=="0005:054C:0CE6.*|0005:054C:0DF2.*", IMPORT{parent}="HID_UNIQ"
 ACTION!="remove", KERNEL=="hidraw*", KERNELS=="0005:054C:0CE6.*|0005:054C:0DF2.*", ENV{HID_UNIQ}=="?*", TEST=="/run/vds/hidden/$env{HID_UNIQ}", MODE="0600", GROUP="root", TAG-="uaccess"
 ACTION!="remove", SUBSYSTEM=="input", ATTRS{id/bustype}=="0005", ATTRS{uniq}=="?*", TEST=="/run/vds/hidden/$attr{uniq}", MODE="0600", GROUP="root", TAG-="uaccess", ENV{LIBINPUT_IGNORE_DEVICE}="1"
+
+# While a Steam Controller is registered, vdsd creates /run/vds/hidden/steam
+# and drives the controller through its dongle's hidraw node. Steam and SDL
+# would open the same node and show the real controller next to the virtual
+# DualSense, so keep every node of the dongle away from them. The kernel's own
+# gamepad for a controller that is not registered stays usable.
+ACTION!="remove", KERNEL=="hidraw*", ATTRS{idVendor}=="28de", ATTRS{idProduct}=="1304", TEST=="/run/vds/hidden/steam", MODE="0600", GROUP="root", TAG-="uaccess"

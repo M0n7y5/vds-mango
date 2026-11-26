@@ -99,7 +99,7 @@ vds::ControllerConfig parse_controller_line(const std::string &line,
   vds::reject_unknown_jsonl_fields(fields, expected, context);
 
   vds::ControllerConfig config{
-      .address = vds::normalize_bluetooth_address(
+      .address = vds::normalize_controller_address(
           vds::require_jsonl_string(fields, "address", context)),
       .profile = vds::parse_controller_profile(
           vds::require_jsonl_string(fields, "profile", context)),
@@ -185,6 +185,32 @@ std::string normalize_bluetooth_address(std::string_view address) {
       normalized.push_back(':');
     }
     normalized.push_back(digits[i]);
+  }
+  return normalized;
+}
+
+bool is_steam_address(std::string_view address) {
+  return address.starts_with(kSteamAddressPrefix);
+}
+
+std::string normalize_controller_address(std::string_view address) {
+  if (!is_steam_address(address)) {
+    return normalize_bluetooth_address(address);
+  }
+  constexpr std::size_t kMaxSerialLength = 32;
+  const std::string_view serial = address.substr(kSteamAddressPrefix.size());
+  const bool valid =
+      !serial.empty() && serial.size() <= kMaxSerialLength &&
+      std::all_of(serial.begin(), serial.end(), [](unsigned char ch) {
+        return std::isalnum(ch) != 0;
+      });
+  if (!valid) {
+    throw std::runtime_error("invalid Steam Controller serial number: " +
+                             std::string(address));
+  }
+  std::string normalized(kSteamAddressPrefix);
+  for (const unsigned char ch : serial) {
+    normalized.push_back(static_cast<char>(std::toupper(ch)));
   }
   return normalized;
 }
@@ -339,7 +365,7 @@ select_controller_config_port(const ControllerConfig &config,
 const ControllerConfig *
 find_controller_config_by_address(const ConfigDb &db,
                                   std::string_view address) {
-  const std::string normalized = normalize_bluetooth_address(address);
+  const std::string normalized = normalize_controller_address(address);
   for (const auto &config : db.controllers) {
     if (config.address == normalized) {
       return &config;
@@ -367,7 +393,7 @@ ConfigDb update_config_db(const std::string &path,
 }
 
 void upsert_controller_config(ConfigDb &db, ControllerConfig config) {
-  config.address = normalize_bluetooth_address(config.address);
+  config.address = normalize_controller_address(config.address);
   validate_ports(config.ports);
   for (auto &controller : db.controllers) {
     if (controller.address == config.address) {
@@ -379,7 +405,7 @@ void upsert_controller_config(ConfigDb &db, ControllerConfig config) {
 }
 
 bool remove_controller_config(ConfigDb &db, std::string_view address) {
-  const std::string normalized = normalize_bluetooth_address(address);
+  const std::string normalized = normalize_controller_address(address);
   const auto old_size = db.controllers.size();
   db.controllers.erase(std::remove_if(db.controllers.begin(),
                                       db.controllers.end(),

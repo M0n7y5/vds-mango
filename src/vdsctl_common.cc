@@ -359,7 +359,7 @@ ControllerConfig parse_vdsctl_attach(int argc, char **argv) {
   }
 
   ControllerConfig config{
-      .address = normalize_bluetooth_address(argv[2]),
+      .address = normalize_controller_address(argv[2]),
       .profile = ControllerProfile::Unspecified,
       .ports = {},
   };
@@ -421,7 +421,8 @@ std::string run_vdsctl_detach(
     int argc, char **argv,
     const std::function<std::string(const std::string &)> &request_control) {
   require_vdsctl_arg_count(argc, 3);
-  return request_control(detach_request(normalize_bluetooth_address(argv[2])));
+  return request_control(
+      detach_request(normalize_controller_address(argv[2])));
 }
 
 std::string run_vdsctl_list(
