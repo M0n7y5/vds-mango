@@ -5,6 +5,7 @@
 #include <utility>
 
 #include <QApplication>
+#include <QCloseEvent>
 #include <QFile>
 #include <QFont>
 #include <QGridLayout>
@@ -21,6 +22,7 @@
 #include <QStringList>
 #include <QStyle>
 #include <QSysInfo>
+#include <QSystemTrayIcon>
 #include <QVBoxLayout>
 
 #include "controller_card.hh"
@@ -66,6 +68,7 @@ MainWindow::MainWindow(const QString &socket_path)
   setCentralWidget(central);
 
   build_menus();
+  build_tray();
   update_health();
   message_timer_.setSingleShot(true);
   connect(&message_timer_, &QTimer::timeout, message_, &QLabel::clear);
@@ -78,6 +81,39 @@ MainWindow::MainWindow(const QString &socket_path)
   refresh_controllers();
   refresh_bluetooth();
   play_startup_animation();
+}
+
+void MainWindow::bring_to_front(const QByteArray &activation_token) {
+  // Qt's xdg-shell plugin activates a window with this variable and unsets
+  // it, which is also how Qt passes on the token of a tray icon click.
+  if (!activation_token.isEmpty() &&
+      QGuiApplication::platformName().startsWith("wayland")) {
+    qputenv("XDG_ACTIVATION_TOKEN", activation_token);
+  }
+  setWindowState(windowState() & ~Qt::WindowMinimized);
+  show();
+  QWidget *front = QApplication::activeModalWidget();
+  if (front == nullptr) {
+    front = this;
+  }
+  front->raise();
+  front->activateWindow();
+}
+
+void MainWindow::closeEvent(QCloseEvent *event) {
+  // Quit and logout close the window as well, and those must end the app.
+  if (tray_ == nullptr || !event->spontaneous()) {
+    QMainWindow::closeEvent(event);
+    return;
+  }
+  event->ignore();
+  hide();
+  if (!tray_hint_shown_) {
+    tray_hint_shown_ = true;
+    tray_->showMessage("vDS Mango",
+                       "vDS Mango keeps running in the tray. Quit it from "
+                       "the tray menu.");
+  }
 }
 
 QWidget *MainWindow::build_banner() {
@@ -201,8 +237,59 @@ void MainWindow::build_menus() {
                           refresh_bluetooth();
                           refresh_names();
                         });
+  setup_menu->addSeparator();
+  setup_menu->addAction(QIcon::fromTheme("application-exit"), "Quit",
+                        QKeySequence::Quit, qApp, &QApplication::quit);
   auto *help_menu = menuBar()->addMenu("Help");
   help_menu->addAction("About vDS Mango", this, [this] { show_about(); });
+}
+
+void MainWindow::build_tray() {
+  if (!QSystemTrayIcon::isSystemTrayAvailable()) {
+    return;
+  }
+  auto *menu = new QMenu(this);
+  menu->addAction("Open vDS Mango", this, [this] { bring_to_front({}); });
+  menu->addSeparator();
+  menu->addAction(QIcon::fromTheme("application-exit"), "Quit", qApp,
+                  &QApplication::quit);
+  tray_ = new QSystemTrayIcon(QIcon(":/icons/vds-mango.svg"), this);
+  tray_->setContextMenu(menu);
+  connect(tray_, &QSystemTrayIcon::activated, this,
+          [this](QSystemTrayIcon::ActivationReason reason) {
+            if (reason != QSystemTrayIcon::Trigger) {
+              return;
+            }
+            if (isVisible() && !isMinimized() &&
+                QApplication::activeModalWidget() == nullptr) {
+              hide();
+            } else {
+              bring_to_front({});
+            }
+          });
+  QApplication::setQuitOnLastWindowClosed(false);
+  update_tray();
+  tray_->show();
+}
+
+void MainWindow::update_tray() {
+  if (tray_ == nullptr) {
+    return;
+  }
+  QStringList lines{"vDS Mango"};
+  if (!daemon_error_.isEmpty()) {
+    lines << "Service not running";
+  } else {
+    for (const ControllerStatus &controller : controllers_) {
+      QString line = name_of(controller.address) + ": " +
+                     (controller.connected ? "connected" : "not connected");
+      if (controller.battery) {
+        line += ", battery " + QString::number(*controller.battery) + "%";
+      }
+      lines << line;
+    }
+  }
+  tray_->setToolTip(lines.join('\n'));
 }
 
 void MainWindow::refresh_controllers() {
@@ -316,6 +403,7 @@ void MainWindow::update_cards() {
     cards_[index]->show_controller(controllers_[index],
                                    name_of(controllers_[index].address));
   }
+  update_tray();
 }
 
 void MainWindow::show_daemon_error(const QString &error) {
@@ -329,6 +417,7 @@ void MainWindow::show_daemon_error(const QString &error) {
   }
   update_health();
   offer_setup_once();
+  update_tray();
 }
 
 void MainWindow::show_action_error(const QString &title, const QString &error) {

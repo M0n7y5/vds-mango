@@ -4,6 +4,7 @@
 
 #include <vector>
 
+#include <QByteArray>
 #include <QHash>
 #include <QMainWindow>
 #include <QString>
@@ -17,6 +18,7 @@ class QGridLayout;
 class QLabel;
 class QPushButton;
 class QStackedWidget;
+class QSystemTrayIcon;
 
 namespace vds::gui {
 
@@ -27,11 +29,22 @@ class MainWindow : public QMainWindow {
 public:
   explicit MainWindow(const QString &socket_path);
 
+  /// Shows, un-minimises, raises and activates the window. On Wayland the
+  /// compositor only lets it take focus with a valid xdg-activation token.
+  void bring_to_front(const QByteArray &activation_token);
+
+protected:
+  /// With a tray icon the close button hides the window to the tray.
+  void closeEvent(QCloseEvent *event) override;
+
 private:
   QWidget *build_banner();
   QWidget *build_controllers_page();
   void build_menus();
   QWidget *build_health_strip();
+  /// Adds the tray icon, if the desktop has a tray.
+  void build_tray();
+  void update_tray();
 
   void refresh_controllers();
   void refresh_status();
@@ -77,6 +90,7 @@ private:
   bool bluetooth_known_ = false;
   bool setup_offered_ = false;
   bool starting_up_ = false;
+  bool tray_hint_shown_ = false;
 
   QWidget *banner_ = nullptr;
   QLabel *banner_text_ = nullptr;
@@ -91,6 +105,8 @@ private:
   QLabel *kernel_check_ = nullptr;
   QLabel *bluetooth_check_ = nullptr;
   QLabel *message_ = nullptr;
+  /// Null without a tray.
+  QSystemTrayIcon *tray_ = nullptr;
 };
 
 } // namespace vds::gui

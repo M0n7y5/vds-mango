@@ -8,8 +8,10 @@
 #include <QCommandLineOption>
 #include <QCommandLineParser>
 #include <QIcon>
+#include <QStandardPaths>
 
 #include "main_window.hh"
+#include "single_instance.hh"
 #include "vds_build_info.hh"
 
 namespace {
@@ -40,7 +42,18 @@ int main(int argc, char **argv) {
     parser.addOption(socket_option);
     parser.process(app);
 
-    vds::gui::MainWindow window(parser.value(socket_option));
+    const QString socket_path = parser.value(socket_option);
+    // The runtime directory is private to the user.
+    vds::gui::SingleInstance instance(
+        QStandardPaths::writableLocation(QStandardPaths::RuntimeLocation),
+        socket_path);
+    if (!instance.start(qgetenv("XDG_ACTIVATION_TOKEN"))) {
+      return 0;
+    }
+    vds::gui::MainWindow window(socket_path);
+    instance.set_activation_handler([&window](const QByteArray &token) {
+      window.bring_to_front(token);
+    });
     window.show();
     return QApplication::exec();
   } catch (const std::exception &error) {

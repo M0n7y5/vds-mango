@@ -95,6 +95,8 @@ Press PS again after the computer wakes from sleep.
 - A click or any key skips the animation when the app opens.
 - **Diagnostics** holds the trace switches and a summary of your setup for
   bug reports.
+- With a system tray, closing the window keeps the app in the tray. Quit
+  it from the tray menu or with Ctrl+Q. Opening it again shows the window.
 
 ## Steam Controller
 
