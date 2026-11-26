@@ -342,13 +342,16 @@ void MainWindow::update_health() {
                daemon_error_);
   }
 
+  /*
+   * vdsd tests the driver when the first DualSense connects on a kernel and
+   * remembers a pass, so until then there is nothing to report.
+   */
   QString kernel_problem;
-  if (!service_ok || !daemon_status_.kernel_fix) {
-    show_check(kernel_check_, Tone::Muted,
-               "Kernel is checked at first connect");
-  } else if (*daemon_status_.kernel_fix) {
+  const bool kernel_known = service_ok && daemon_status_.kernel_fix;
+  kernel_check_->setVisible(kernel_known);
+  if (kernel_known && *daemon_status_.kernel_fix) {
     show_check(kernel_check_, Tone::Positive, "Kernel has the DualSense fix");
-  } else {
+  } else if (kernel_known) {
     kernel_problem = "This kernel cannot share controllers with Bluetooth. " +
                      kKernelRequirement;
     show_check(kernel_check_, Tone::Negative, "Kernel lacks the DualSense fix",

@@ -36,6 +36,7 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
+#include <sys/utsname.h>
 #include <systemd/sd-login.h>
 #include <unistd.h>
 
@@ -47,6 +48,7 @@
 #include "vds_build_info.hh"
 #include "vds_common.hh"
 #include "vds_config.hh"
+#include "vds_fs.hh"
 #include "vds_io.hh"
 #include "vds_log.hh"
 #include "vds_profile.hh"
@@ -1769,6 +1771,56 @@ void hide_steam_dongles(bool hidden, vds::Logger &logger) {
 }
 
 /*
+ * A passed driver test holds for one build of the kernel and of
+ * hid-playstation, so it is kept next to the database: the first line names
+ * the kernel, the second the module. A failed one is tested again, because a
+ * wrong "no" would stick until the next kernel.
+ */
+constexpr const char *kKernelFixRecord = "kernel-fix";
+
+std::string kernel_build() {
+  struct utsname names {};
+  if (::uname(&names) != 0) {
+    return {};
+  }
+  return std::string(names.release) + " " + names.version;
+}
+
+/* Empty while hid-playstation is not loaded, and when it is built in. */
+std::string playstation_module_build() {
+  std::ifstream file("/sys/module/hid_playstation/srcversion");
+  std::string build;
+  std::getline(file, build);
+  return build;
+}
+
+/* The module build of a test this kernel passed, else empty. */
+std::optional<std::string>
+remembered_kernel_fix(const std::filesystem::path &record) {
+  std::ifstream file(record);
+  std::string kernel;
+  std::string module;
+  if (!std::getline(file, kernel) || kernel.empty() ||
+      kernel != kernel_build()) {
+    return std::nullopt;
+  }
+  std::getline(file, module);
+  return module;
+}
+
+void remember_kernel_fix(const std::filesystem::path &record,
+                         vds::Logger &logger) {
+  try {
+    vds::write_file_atomic(record, kernel_build() + "\n" +
+                                       playstation_module_build() + "\n");
+  } catch (const std::exception &error) {
+    logger.log(vds::LogScope::Daemon, vds::LogLevel::Warn,
+               std::string("cannot remember the kernel check: ") +
+                   error.what());
+  }
+}
+
+/*
  * Tells whether this kernel's hid-playstation parses the controller's
  * Bluetooth audio reports as input. Once audio is enabled the pad sends 100
  * of them per second under the ID and size of its state report. An unfixed
@@ -2932,7 +2984,18 @@ int run_daemon(const Options &options, vds::Logger &logger) {
   bool epoll_dirty = true;
   bool first_reload = true;
   unsigned control_accept_failures = 0;
-  BluetoothSharing sharing = BluetoothSharing::Unknown;
+  const std::filesystem::path kernel_fix_record =
+      std::filesystem::path(options.db_path).parent_path() / kKernelFixRecord;
+  /*
+   * The module a remembered test ran against. It is compared once the module
+   * is loaded, which a connecting DualSense takes care of.
+   */
+  std::optional<std::string> unverified_module =
+      remembered_kernel_fix(kernel_fix_record);
+  bool kernel_fix_remembered = unverified_module.has_value();
+  BluetoothSharing sharing = kernel_fix_remembered
+                                 ? BluetoothSharing::Supported
+                                 : BluetoothSharing::Unknown;
   bool scan_pads = false;
   Clock::time_point puck_claim_until{};
   bool pucks_claimed = false;
@@ -2997,8 +3060,22 @@ int run_daemon(const Options &options, vds::Logger &logger) {
 
     if (scan_pads && !asleep) {
       scan_pads = false;
+      if (unverified_module) {
+        const std::string loaded = playstation_module_build();
+        if (!loaded.empty()) {
+          if (loaded != *unverified_module) {
+            sharing = BluetoothSharing::Unknown;
+            kernel_fix_remembered = false;
+          }
+          unverified_module.reset();
+        }
+      }
       const bool was_supported = sharing != BluetoothSharing::Unsupported;
       attach_bluez_pads(ports, controllers, sharing, logger, epoll_dirty);
+      if (sharing == BluetoothSharing::Supported && !kernel_fix_remembered) {
+        remember_kernel_fix(kernel_fix_record, logger);
+        kernel_fix_remembered = true;
+      }
       if (was_supported && sharing == BluetoothSharing::Unsupported) {
         /* Let the pads reconnect as plain Bluetooth gamepads meanwhile. */
         sync_hidden_pad_markers(controllers, false, pucks_claimed, logger);
