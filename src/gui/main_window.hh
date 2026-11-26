@@ -47,6 +47,9 @@ private:
   /// The three checks along the bottom, and the banner while one fails.
   void update_health();
   void offer_setup_once();
+  /// Plays the logo over the window, unless the desktop has animations
+  /// turned off.
+  void play_startup_animation();
   QString name_of(const QString &address) const;
   QString system_info() const;
 
@@ -73,6 +76,7 @@ private:
   bool daemon_known_ = false;
   bool bluetooth_known_ = false;
   bool setup_offered_ = false;
+  bool starting_up_ = false;
 
   QWidget *banner_ = nullptr;
   QLabel *banner_text_ = nullptr;

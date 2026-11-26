@@ -20,6 +20,8 @@
 !/data/*.rules
 !/data/icons/
 !/data/icons/*.svg
+!/data/animations/
+!/data/animations/*.json
 
 !/include/
 !/include/**/

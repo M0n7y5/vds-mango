@@ -93,6 +93,11 @@ target_include_directories(vds_gui_protocol
                            PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src/gui)
 target_link_libraries(vds_gui_protocol PUBLIC vds_config Qt6::Core)
 
+add_library(vds_gui_lottie OBJECT src/gui/lottie.cc)
+target_include_directories(vds_gui_lottie
+                           PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src/gui)
+target_link_libraries(vds_gui_lottie PUBLIC Qt6::Gui)
+
 add_library(vds_usbip OBJECT src/vds_usbip.cc)
 target_include_directories(vds_usbip PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
                                             ${CMAKE_CURRENT_SOURCE_DIR}/src)
@@ -160,6 +165,15 @@ if(BUILD_TESTS)
   add_test(NAME usbip COMMAND test_usbip
            WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 
+  add_executable(test_lottie tests/test_lottie.cc)
+  target_link_libraries(test_lottie PRIVATE vds_test_support vds_gui_lottie)
+  set(VDS_STARTUP_ANIMATION
+      ${CMAKE_CURRENT_SOURCE_DIR}/data/animations/startup.json)
+  target_compile_definitions(
+    test_lottie PRIVATE VDS_STARTUP_ANIMATION="${VDS_STARTUP_ANIMATION}")
+  add_test(NAME lottie COMMAND test_lottie
+           WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+
   add_executable(test_steam tests/test_steam.cc)
   target_link_libraries(test_steam PRIVATE vds_test_support vds_steam)
   add_test(NAME steam COMMAND test_steam
@@ -224,7 +238,8 @@ add_executable(
   src/gui/diagnostics_dialog.cc
   src/gui/main_window.cc
   src/gui/setup_helper.cc
-  src/gui/setup_wizard.cc)
+  src/gui/setup_wizard.cc
+  src/gui/startup_animation.cc)
 add_dependencies(vds-mango vds_build_info_header)
 target_include_directories(vds-mango PRIVATE ${VDS_GENERATED_DIR})
 target_link_libraries(
@@ -232,6 +247,7 @@ target_link_libraries(
   PRIVATE jsonl
           vds_common
           vds_config
+          vds_gui_lottie
           vds_gui_protocol
           Qt6::DBus
           Qt6::Network
@@ -242,6 +258,9 @@ qt_add_resources(
         data/icons/dualsense-edge.svg data/icons/headset.svg
         data/icons/microphone.svg data/icons/microphone-muted.svg
         data/icons/steam-controller.svg)
+qt_add_resources(
+  vds-mango "animations" PREFIX "/animations" BASE "data/animations"
+  FILES data/animations/startup.json)
 
 set(VDS_POLKIT_POLICY
     ${CMAKE_CURRENT_BINARY_DIR}/io.github.m0n7y5.vds-mango.policy)

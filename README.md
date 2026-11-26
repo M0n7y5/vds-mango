@@ -132,6 +132,9 @@ The line along the bottom checks the service, the kernel fix and Bluetooth;
 a banner explains whichever one fails. Diagnostics opens the trace logging
 switches and a summary of your setup to copy into a bug report.
 
+The logo animation that plays when the app opens can be skipped with a click
+or any key.
+
 Edit also sets, per controller, how much audio the controller queues before
 it plays haptics and speaker sound. Smaller values react sooner; too small
 makes the speaker crackle. The choice is saved with the controller and takes

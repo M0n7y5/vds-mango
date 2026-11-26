@@ -5,6 +5,7 @@
 #include <utility>
 
 #include <QApplication>
+#include <QFile>
 #include <QFont>
 #include <QGridLayout>
 #include <QHBoxLayout>
@@ -25,9 +26,11 @@
 #include "controller_card.hh"
 #include "controller_dialog.hh"
 #include "diagnostics_dialog.hh"
+#include "lottie.hh"
 #include "main_window.hh"
 #include "setup_wizard.hh"
 #include "spacing.hh"
+#include "startup_animation.hh"
 
 namespace vds::gui {
 
@@ -74,6 +77,7 @@ MainWindow::MainWindow(const QString &socket_path)
   poll_timer_.start(kPollIntervalMs);
   refresh_controllers();
   refresh_bluetooth();
+  play_startup_animation();
 }
 
 QWidget *MainWindow::build_banner() {
@@ -377,7 +381,8 @@ void MainWindow::update_health() {
 }
 
 void MainWindow::offer_setup_once() {
-  if (setup_offered_ || !daemon_known_) {
+  // The wizard must not open on top of the logo.
+  if (setup_offered_ || !daemon_known_ || starting_up_) {
     return;
   }
   setup_offered_ = true;
@@ -385,6 +390,24 @@ void MainWindow::offer_setup_once() {
     // Queued so the dialog's event loop does not run inside a reply handler.
     QTimer::singleShot(0, this, [this] { open_setup(); });
   }
+}
+
+void MainWindow::play_startup_animation() {
+  // Plasma answers 0 while its animation speed is set to instant.
+  if (style()->styleHint(QStyle::SH_Widget_Animation_Duration, nullptr,
+                         this) == 0) {
+    return;
+  }
+  QFile file(":/animations/startup.json");
+  (void)file.open(QIODevice::ReadOnly);
+  starting_up_ = true;
+  new StartupAnimation(
+      LottieAnimation(file.readAll()),
+      [this] {
+        starting_up_ = false;
+        offer_setup_once();
+      },
+      this);
 }
 
 QString MainWindow::name_of(const QString &address) const {
