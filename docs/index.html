@@ -113,6 +113,8 @@ pre {
 }
 li { margin: 0.35rem 0; }
 ol li::marker { color: var(--muted); font-weight: 600; }
+.links { display: flex; flex-wrap: wrap; gap: 0.4rem 1.5rem; padding: 0; list-style: none; }
+.links li { margin: 0; }
 a {
   color: inherit;
   text-decoration-color: var(--accent);
@@ -147,6 +149,14 @@ footer p { margin: 0.4rem 0; }
 
 <p class="lede">vDS Mango makes a DualSense on Bluetooth look like one on a cable.</p>
 <p>Games on Linux get what the cable gives them: haptic feedback, adaptive triggers, the speaker, the microphone and the headphone jack. Only firmware updates still need the cable.</p>
+<nav aria-label="Project links">
+  <ul class="links">
+    <li><a href="https://aur.archlinux.org/packages/vds-mango">AUR package</a></li>
+    <li><a href="https://github.com/M0n7y5/vds-mango">GitHub</a></li>
+    <li><a href="https://discord.com/channels/862292009423470592/1575661049795973172/1575661054392803428">Help on Discord</a></li>
+    <li><a href="https://ko-fi.com/m0n7y5">Support on Ko-fi</a></li>
+  </ul>
+</nav>
 
 <figure>
   <img src="main-window.png" width="837" height="520" alt="The vDS Mango window with a DualSense and a Steam Controller">
@@ -188,7 +198,7 @@ footer p { margin: 0.4rem 0; }
 <p>A 2026 Steam Controller on its wireless Puck can be added in the same wizard. It appears as a DualSense. This part is experimental. The README lists <a href="https://github.com/M0n7y5/vds-mango#steam-controller">what is mapped</a>.</p>
 
 <h2 id="problems">Reporting problems</h2>
-<p>Report bugs on the <a href="https://discord.gg/cachyos-862292009423470592">CachyOS Discord</a>. The GitHub issue tracker is not open yet. Paste the summary from Diagnostics &gt; Copy system info.</p>
+<p>Ask questions and report bugs in the <a href="https://discord.com/channels/862292009423470592/1575661049795973172/1575661054392803428">vDS Mango thread</a> on the CachyOS Discord. The thread opens only for members of the server, so <a href="https://discord.gg/cachyos-862292009423470592">join the CachyOS Discord</a> first. The GitHub issue tracker is not open yet. Paste the summary from Diagnostics &gt; Copy system info.</p>
 <p>The <a href="https://github.com/M0n7y5/vds-mango#readme">README</a> covers the rest: the app, the command line, how it works and building from source.</p>
 
 <h2 id="credits">Credits</h2>

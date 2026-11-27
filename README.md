@@ -6,6 +6,13 @@
   </picture>
 </p>
 
+<p align="center">
+  <a href="https://m0n7y5.github.io/vds-mango/">Project page</a> ·
+  <a href="https://aur.archlinux.org/packages/vds-mango">AUR package</a> ·
+  <a href="https://discord.com/channels/862292009423470592/1575661049795973172/1575661054392803428">Help on Discord</a> ·
+  <a href="https://ko-fi.com/m0n7y5">Support on Ko-fi</a>
+</p>
+
 > [!WARNING]
 >
 > **CachyOS is the only supported system at the moment.** vDS Mango needs a
@@ -116,9 +123,11 @@ experimental.
 
 ## Reporting issues
 
-Report bugs on the
-[CachyOS Discord](https://discord.gg/cachyos-862292009423470592). The GitHub
-issue tracker is not open yet.
+Ask questions and report bugs in the
+[vDS Mango thread](https://discord.com/channels/862292009423470592/1575661049795973172/1575661054392803428)
+on the CachyOS Discord. The thread opens only for members of the server, so
+[join the CachyOS Discord](https://discord.gg/cachyos-862292009423470592)
+first. The GitHub issue tracker is not open yet.
 
 Paste the summary from Diagnostics > Copy system info. It contains no
 Bluetooth addresses. Add your Bluetooth adapter, the game or application,
