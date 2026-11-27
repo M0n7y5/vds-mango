@@ -325,7 +325,7 @@ void MainWindow::build_tray() {
   tray_menu_ = new QMenu(this);
   tray_entries_end_ = tray_menu_->addSeparator();
   tray_menu_->addAction(QIcon::fromTheme("list-add"), "Add controller…", this,
-                        [this] { open_setup_from_tray(); });
+                        [this] { open_from_tray([this] { open_setup(); }); });
   tray_menu_->addAction("Open vDS Mango", this, [this] { bring_to_front({}); });
   tray_menu_->addSeparator();
   tray_menu_->addAction(QIcon::fromTheme("application-exit"), "Quit", qApp,
@@ -380,25 +380,48 @@ void MainWindow::update_tray_menu() {
   std::vector<TrayEntry> entries =
       tray_entries(service_state(), controllers_,
                    [this](const QString &address) { return name_of(address); });
-  if (entries == tray_entries_) {
+  if (same_tray_structure(tray_entries_, entries)) {
+    for (std::size_t index = 0; index < entries.size(); ++index) {
+      tray_entry_actions_[index]->setText(entries[index].text);
+    }
+    tray_entries_ = std::move(entries);
     return;
   }
   for (QAction *action : tray_entry_actions_) {
     tray_menu_->removeAction(action);
-    action->deleteLater();
+    if (QMenu *submenu = action->menu<QMenu *>()) {
+      submenu->deleteLater();
+    } else {
+      action->deleteLater();
+    }
   }
   tray_entry_actions_.clear();
   for (const TrayEntry &entry : entries) {
-    auto *action = new QAction(entry.text, tray_menu_);
-    if (entry.kind == TrayEntry::Kind::Test) {
-      connect(action, &QAction::triggered, this,
-              [this, address = entry.address] { test_controller(address); });
-    } else {
+    if (entry.actions.empty()) {
+      auto *action = new QAction(entry.text, tray_menu_);
       connect(action, &QAction::triggered, this,
               [this] { bring_to_front({}); });
+      tray_menu_->insertAction(tray_entries_end_, action);
+      tray_entry_actions_.push_back(action);
+      continue;
     }
-    tray_menu_->insertAction(tray_entries_end_, action);
-    tray_entry_actions_.push_back(action);
+    auto *submenu = new QMenu(entry.text, tray_menu_);
+    const QString address = entry.address;
+    for (const TrayAction action : entry.actions) {
+      switch (action) {
+      case TrayAction::Test:
+        submenu->addAction("Test", this,
+                           [this, address] { test_controller(address); });
+        break;
+      case TrayAction::Edit:
+        submenu->addAction("Edit…", this, [this, address] {
+          open_from_tray([this, address] { edit_controller(address); });
+        });
+        break;
+      }
+    }
+    tray_entry_actions_.push_back(
+        tray_menu_->insertMenu(tray_entries_end_, submenu));
   }
   tray_entries_ = std::move(entries);
 }
@@ -705,14 +728,14 @@ void MainWindow::open_setup() {
   refresh_names();
 }
 
-void MainWindow::open_setup_from_tray() {
+void MainWindow::open_from_tray(const std::function<void()> &open_dialog) {
   bring_to_front({});
-  // Queued so the wizard's event loop does not hold up the D-Bus call that
+  // Queued so the dialog's event loop does not hold up the D-Bus call that
   // delivered the click. The check runs then, so a second click while the
-  // first is queued only raises the wizard.
-  QTimer::singleShot(0, this, [this] {
+  // first is queued only raises the dialog.
+  QTimer::singleShot(0, this, [open_dialog] {
     if (QApplication::activeModalWidget() == nullptr) {
-      open_setup();
+      open_dialog();
     }
   });
 }

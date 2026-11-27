@@ -2,6 +2,7 @@
 // Copyright (C) 2026 M0n7y5 <17201053+M0n7y5@users.noreply.github.com>
 #pragma once
 
+#include <functional>
 #include <optional>
 #include <vector>
 
@@ -77,9 +78,9 @@ private:
   QString system_info() const;
 
   void open_setup();
-  /// Brings the window to the front and opens the wizard, unless a dialog
-  /// is open already.
-  void open_setup_from_tray();
+  /// Brings the window to the front and opens a dialog with open_dialog,
+  /// unless a dialog is open already.
+  void open_from_tray(const std::function<void()> &open_dialog);
   void open_diagnostics();
   void test_controller(const QString &address);
   void edit_controller(const QString &address);

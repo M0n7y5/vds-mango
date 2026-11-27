@@ -17,16 +17,16 @@ constexpr unsigned kLowBatteryPercent = 15;
 
 enum class ServiceState { Checking, Running, Unreachable };
 
+enum class TrayAction { Test, Edit };
+
 struct TrayEntry {
-  enum class Kind {
-    /// A controller's state or a line about the service. Opens the window.
-    Status,
-    /// Sends a test buzz to address.
-    Test,
-  };
-  Kind kind = Kind::Status;
+  /// A controller's state, or a line about the service or the empty list.
   QString text = {};
+  /// Empty for a line that is not about one controller.
   QString address = {};
+  /// What the controller's submenu offers, in menu order. A line without
+  /// actions is a plain entry that opens the window.
+  std::vector<TrayAction> actions = {};
 
   bool operator==(const TrayEntry &) const = default;
 };
@@ -36,6 +36,11 @@ std::vector<TrayEntry>
 tray_entries(ServiceState service,
              const std::vector<ControllerStatus> &controllers,
              const std::function<QString(const QString &)> &name_of);
+
+/// Whether the menu built for before still fits after once its texts are
+/// updated. A rebuild would close a submenu that is open under the pointer.
+bool same_tray_structure(const std::vector<TrayEntry> &before,
+                         const std::vector<TrayEntry> &after);
 
 enum class TrayIconState { Connected, Idle, Unreachable };
 

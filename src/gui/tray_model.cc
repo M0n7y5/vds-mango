@@ -2,6 +2,7 @@
 // Copyright (C) 2026 M0n7y5 <17201053+M0n7y5@users.noreply.github.com>
 
 #include <algorithm>
+#include <utility>
 
 #include "tray_model.hh"
 
@@ -30,31 +31,38 @@ std::vector<TrayEntry>
 tray_entries(ServiceState service,
              const std::vector<ControllerStatus> &controllers,
              const std::function<QString(const QString &)> &name_of) {
-  using Kind = TrayEntry::Kind;
   switch (service) {
   case ServiceState::Checking:
-    return {{.kind = Kind::Status, .text = "Checking the service"}};
+    return {{.text = "Checking the service"}};
   case ServiceState::Unreachable:
-    return {{.kind = Kind::Status, .text = "Service not running"}};
+    return {{.text = "Service not running"}};
   case ServiceState::Running:
     break;
   }
   if (controllers.empty()) {
-    return {{.kind = Kind::Status, .text = "No controllers registered"}};
+    return {{.text = "No controllers registered"}};
   }
   std::vector<TrayEntry> entries;
   for (const ControllerStatus &controller : controllers) {
-    const QString name = name_of(controller.address);
-    entries.push_back({.kind = Kind::Status,
-                       .text = controller_line(controller, name),
-                       .address = controller.address});
+    TrayEntry entry{
+        .text = controller_line(controller, name_of(controller.address)),
+        .address = controller.address};
     if (controller.connected) {
-      entries.push_back({.kind = Kind::Test,
-                         .text = "Test " + name,
-                         .address = controller.address});
+      entry.actions.push_back(TrayAction::Test);
     }
+    entry.actions.push_back(TrayAction::Edit);
+    entries.push_back(std::move(entry));
   }
   return entries;
+}
+
+bool same_tray_structure(const std::vector<TrayEntry> &before,
+                         const std::vector<TrayEntry> &after) {
+  return std::equal(before.begin(), before.end(), after.begin(), after.end(),
+                    [](const TrayEntry &left, const TrayEntry &right) {
+                      return left.address == right.address &&
+                             left.actions == right.actions;
+                    });
 }
 
 TrayIconState
