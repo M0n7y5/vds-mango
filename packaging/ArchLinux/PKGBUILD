@@ -20,7 +20,7 @@ install=vds-mango.install
 _tag=${pkgver/[[:alpha:]]/-&}
 _src=$pkgname-$_tag
 source=("$_src.tar.gz::$url/archive/refs/tags/$_tag.tar.gz")
-sha256sums=('SKIP')
+sha256sums=('82a640fa6b4eb8ba92426161f05504120fd03efd688395bc22b4a3e38c4711b5')
 
 build() {
 	cmake -S "$_src" -B build \
