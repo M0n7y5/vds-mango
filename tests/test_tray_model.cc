@@ -17,6 +17,7 @@ namespace {
 using vds::gui::ControllerStatus;
 using vds::gui::ServiceState;
 using vds::gui::TrayEntry;
+using vds::gui::TrayIconState;
 
 constexpr const char *kPad = "aa:bb:cc:dd:ee:01";
 constexpr const char *kSteam = "steam:FXA1234567B89";
@@ -104,6 +105,23 @@ void test_first_poll_pending_does_not_claim_no_controllers() {
                "status|Checking the service|\n");
 }
 
+void test_one_connected_controller_shows_the_normal_icon() {
+  VDS_CHECK(vds::gui::tray_icon_state(ServiceState::Running,
+                                      {off(kSteam), connected(kPad)}) ==
+            TrayIconState::Connected);
+}
+
+void test_no_connected_controller_dims_the_icon() {
+  VDS_CHECK(vds::gui::tray_icon_state(ServiceState::Running, {off(kPad)}) ==
+            TrayIconState::Idle);
+}
+
+void test_unreachable_service_warns_despite_a_stale_connected_list() {
+  VDS_CHECK(vds::gui::tray_icon_state(ServiceState::Unreachable,
+                                      {connected(kPad)}) ==
+            TrayIconState::Unreachable);
+}
+
 } // namespace
 
 void run_tests() {
@@ -115,6 +133,9 @@ void run_tests() {
   test_no_registered_controller_shows_one_line_saying_so();
   test_unreachable_service_replaces_the_stale_list();
   test_first_poll_pending_does_not_claim_no_controllers();
+  test_one_connected_controller_shows_the_normal_icon();
+  test_no_connected_controller_dims_the_icon();
+  test_unreachable_service_warns_despite_a_stale_connected_list();
 }
 
 } // namespace vds::test

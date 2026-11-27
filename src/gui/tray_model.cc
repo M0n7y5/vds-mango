@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 // Copyright (C) 2026 M0n7y5 <17201053+M0n7y5@users.noreply.github.com>
 
+#include <algorithm>
+
 #include "tray_model.hh"
 
 namespace vds::gui {
@@ -53,6 +55,18 @@ tray_entries(ServiceState service,
     }
   }
   return entries;
+}
+
+TrayIconState
+tray_icon_state(ServiceState service,
+                const std::vector<ControllerStatus> &controllers) {
+  if (service == ServiceState::Unreachable) {
+    return TrayIconState::Unreachable;
+  }
+  const bool any_connected =
+      std::any_of(controllers.begin(), controllers.end(),
+                  [](const ControllerStatus &c) { return c.connected; });
+  return any_connected ? TrayIconState::Connected : TrayIconState::Idle;
 }
 
 } // namespace vds::gui

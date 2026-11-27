@@ -33,4 +33,9 @@ tray_entries(ServiceState service,
              const std::vector<ControllerStatus> &controllers,
              const std::function<QString(const QString &)> &name_of);
 
+enum class TrayIconState { Connected, Idle, Unreachable };
+
+TrayIconState tray_icon_state(ServiceState service,
+                              const std::vector<ControllerStatus> &controllers);
+
 } // namespace vds::gui

@@ -123,6 +123,7 @@ private:
   QAction *tray_entries_end_ = nullptr;
   std::vector<TrayEntry> tray_entries_;
   std::vector<QAction *> tray_entry_actions_;
+  std::optional<TrayIconState> tray_icon_state_;
 };
 
 } // namespace vds::gui

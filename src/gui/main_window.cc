@@ -11,11 +11,14 @@
 #include <QGridLayout>
 #include <QHBoxLayout>
 #include <QIcon>
+#include <QImage>
 #include <QKeySequence>
 #include <QLabel>
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
+#include <QPainter>
+#include <QPixmap>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QStackedWidget>
@@ -42,6 +45,7 @@ constexpr int kPollIntervalMs = 2000;
 constexpr int kStatusMessageMs = 8000;
 constexpr int kCardColumns = 2;
 constexpr int kLogoSize = 96;
+constexpr int kTrayIconSizes[] = {16, 22, 24, 32, 48, 64};
 
 void show_check(QLabel *check, Tone tone, const QString &text,
                 const QString &problem = {}) {
@@ -73,6 +77,51 @@ void show_bluetooth_problem(QLabel *check, const BluetoothProblem &problem) {
 std::optional<BluetoothProblem::Kind>
 kind_of(const std::optional<BluetoothProblem> &problem) {
   return problem ? std::optional(problem->kind) : std::nullopt;
+}
+
+QImage tray_image(TrayIconState state, int size) {
+  QImage image = QIcon(":/icons/vds-mango.svg")
+                     .pixmap(QSize(size, size), 1.0)
+                     .toImage()
+                     .convertToFormat(QImage::Format_ARGB32);
+  if (state == TrayIconState::Idle) {
+    for (int y = 0; y < image.height(); ++y) {
+      auto *line = reinterpret_cast<QRgb *>(image.scanLine(y));
+      for (int x = 0; x < image.width(); ++x) {
+        const int gray = qGray(line[x]);
+        line[x] = qRgba(gray, gray, gray, qAlpha(line[x]) * 3 / 4);
+      }
+    }
+  } else if (state == TrayIconState::Unreachable) {
+    // Breeze's negative red. The white ring keeps the mark apart from the
+    // orange mango and from a dark panel.
+    QPainter painter(&image);
+    painter.setRenderHint(QPainter::Antialiasing);
+    const qreal ring = std::max(1.0, size / 16.0);
+    const qreal diameter = size * 0.6;
+    const QRectF mark(size - diameter, size - diameter, diameter, diameter);
+    painter.setPen(QPen(Qt::white, ring));
+    painter.setBrush(QColor(0xda, 0x44, 0x53));
+    painter.drawEllipse(mark.adjusted(ring / 2, ring / 2, -ring / 2,
+                                      -ring / 2));
+    const qreal bar = std::max(1.5, diameter / 6);
+    const QPointF center = mark.center();
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(Qt::white);
+    painter.drawRect(QRectF(center.x() - bar / 2, mark.top() + diameter * 0.2,
+                            bar, diameter * 0.36));
+    painter.drawRect(QRectF(center.x() - bar / 2,
+                            mark.bottom() - diameter * 0.2 - bar, bar, bar));
+  }
+  return image;
+}
+
+QIcon tray_icon(TrayIconState state) {
+  QIcon icon;
+  for (const int size : kTrayIconSizes) {
+    icon.addPixmap(QPixmap::fromImage(tray_image(state, size)));
+  }
+  return icon;
 }
 
 } // namespace
@@ -281,7 +330,7 @@ void MainWindow::build_tray() {
   tray_menu_->addSeparator();
   tray_menu_->addAction(QIcon::fromTheme("application-exit"), "Quit", qApp,
                         &QApplication::quit);
-  tray_ = new QSystemTrayIcon(QIcon(":/icons/vds-mango.svg"), this);
+  tray_ = new QSystemTrayIcon(this);
   tray_->setContextMenu(tray_menu_);
   connect(tray_, &QSystemTrayIcon::activated, this,
           [this](QSystemTrayIcon::ActivationReason reason) {
@@ -319,6 +368,12 @@ void MainWindow::update_tray() {
   }
   tray_->setToolTip(lines.join('\n'));
   update_tray_menu();
+  const TrayIconState icon_state =
+      tray_icon_state(service_state(), controllers_);
+  if (icon_state != tray_icon_state_) {
+    tray_icon_state_ = icon_state;
+    tray_->setIcon(tray_icon(icon_state));
+  }
 }
 
 void MainWindow::update_tray_menu() {
