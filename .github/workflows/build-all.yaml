@@ -23,6 +23,12 @@ on:
 permissions:
   contents: read
 
+# A dispatched run may be publishing a release, so only push and pull request
+# runs give way to a newer run on the same ref.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+
 jobs:
   linux-userspace:
     name: Linux userspace (${{ matrix.cxx }})
