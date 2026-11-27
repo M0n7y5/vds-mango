@@ -277,11 +277,29 @@ private:
           client_.send(
               local_targets_request(claiming_),
               [this, registered](const QByteArray &targets) {
+                clear_service_error();
                 find_bluetooth(registered, switched_on(targets));
               },
-              [this](const QString &error) { status_->setText(error); });
+              [this](const QString &error) { show_service_error(error); });
         },
-        [this](const QString &error) { status_->setText(error); });
+        [this](const QString &error) { show_service_error(error); });
+  }
+
+  void show_service_error(const QString &error) {
+    service_error_ = error;
+    status_->setText(error);
+  }
+
+  /* A message another action set since then is not the daemon's to clear. */
+  void clear_service_error() {
+    if (!service_error_.isEmpty() && status_->text() == service_error_) {
+      status_->setText(idle_status());
+    }
+    service_error_.clear();
+  }
+
+  QString idle_status() const {
+    return candidates_.empty() ? "Looking for controllers…" : QString();
   }
 
   /* The Steam Controllers that are on and not registered yet. */
@@ -363,8 +381,7 @@ private:
     if (list_->currentRow() < 0 && list_->count() == 1) {
       list_->setCurrentRow(0);
     }
-    status_->setText(candidates_.empty() ? "Looking for controllers…"
-                                         : QString());
+    status_->setText(idle_status());
     emit completeChanged();
   }
 
@@ -375,6 +392,8 @@ private:
   QListWidget *list_ = nullptr;
   StatusRow *bluetooth_ = nullptr;
   QLabel *status_ = nullptr;
+  /// The daemon error the status line shows, until the daemon answers.
+  QString service_error_;
   QLabel *claim_hint_ = nullptr;
   QPushButton *claim_ = nullptr;
   std::vector<Candidate> candidates_;
