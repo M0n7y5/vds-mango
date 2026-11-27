@@ -381,14 +381,16 @@ void MainWindow::update_tray_menu() {
       tray_entries(service_state(), controllers_,
                    [this](const QString &address) { return name_of(address); });
   if (same_tray_controllers(tray_entries_, entries)) {
+    // Plasma's dbusmenu importer skips the first LayoutUpdated for a
+    // submenu after it fetched that submenu on opening it, so a refilled
+    // submenu kept its old items and their clicks went to ids the app had
+    // dropped. Properties reach it reliably, so the items stay and only
+    // their texts and visibility change.
     for (std::size_t index = 0; index < entries.size(); ++index) {
-      QAction *action = tray_entry_actions_[index];
-      action->setText(entries[index].text);
-      QMenu *submenu = action->menu<QMenu *>();
-      if (submenu != nullptr &&
-          entries[index].actions != tray_entries_[index].actions) {
-        submenu->clear();
-        fill_tray_submenu(submenu, entries[index]);
+      tray_entry_actions_[index]->setText(entries[index].text);
+      const std::vector<TrayItem> &items = entries[index].actions;
+      for (std::size_t item = 0; item < items.size(); ++item) {
+        tray_item_actions_[index][item]->setVisible(items[item].shown);
       }
     }
     tray_entries_ = std::move(entries);
@@ -403,38 +405,42 @@ void MainWindow::update_tray_menu() {
     }
   }
   tray_entry_actions_.clear();
+  tray_item_actions_.clear();
   for (const TrayEntry &entry : entries) {
+    std::vector<QAction *> items;
     if (entry.actions.empty()) {
       auto *action = new QAction(entry.text, tray_menu_);
       connect(action, &QAction::triggered, this,
               [this] { bring_to_front({}); });
       tray_menu_->insertAction(tray_entries_end_, action);
       tray_entry_actions_.push_back(action);
+      tray_item_actions_.push_back(items);
       continue;
     }
     auto *submenu = new QMenu(entry.text, tray_menu_);
-    fill_tray_submenu(submenu, entry);
+    for (const TrayItem &item : entry.actions) {
+      items.push_back(add_tray_item(submenu, item.action, entry.address));
+      items.back()->setVisible(item.shown);
+    }
     tray_entry_actions_.push_back(
         tray_menu_->insertMenu(tray_entries_end_, submenu));
+    tray_item_actions_.push_back(items);
   }
   tray_entries_ = std::move(entries);
 }
 
-void MainWindow::fill_tray_submenu(QMenu *submenu, const TrayEntry &entry) {
-  const QString address = entry.address;
-  for (const TrayAction action : entry.actions) {
-    switch (action) {
-    case TrayAction::Test:
-      submenu->addAction("Test", this,
-                         [this, address] { test_controller(address); });
-      break;
-    case TrayAction::Edit:
-      submenu->addAction("Edit…", this, [this, address] {
-        open_from_tray([this, address] { edit_controller(address); });
-      });
-      break;
-    }
+QAction *MainWindow::add_tray_item(QMenu *submenu, TrayAction action,
+                                   const QString &address) {
+  switch (action) {
+  case TrayAction::Test:
+    return submenu->addAction("Test", this,
+                              [this, address] { test_controller(address); });
+  case TrayAction::Edit:
+    return submenu->addAction("Edit…", this, [this, address] {
+      open_from_tray([this, address] { edit_controller(address); });
+    });
   }
+  return nullptr;
 }
 
 ServiceState MainWindow::service_state() const {

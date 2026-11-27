@@ -19,14 +19,24 @@ enum class ServiceState { Checking, Running, Unreachable };
 
 enum class TrayAction { Test, Edit };
 
+struct TrayItem {
+  TrayAction action = TrayAction::Edit;
+  /// A hidden item keeps its place, so the menu changes only properties.
+  bool shown = true;
+
+  bool operator==(const TrayItem &) const = default;
+};
+
 struct TrayEntry {
   /// A controller's state, or a line about the service or the empty list.
   QString text = {};
   /// Empty for a line that is not about one controller.
   QString address = {};
-  /// What the controller's submenu offers, in menu order. A line without
-  /// actions is a plain entry that opens the window.
-  std::vector<TrayAction> actions = {};
+  /// What the controller's submenu offers, in menu order. It depends only
+  /// on the controller being registered, and connecting or disconnecting
+  /// changes only which items are shown. A line without actions is a plain
+  /// entry that opens the window.
+  std::vector<TrayItem> actions = {};
 
   bool operator==(const TrayEntry &) const = default;
 };
@@ -37,9 +47,10 @@ tray_entries(ServiceState service,
              const std::vector<ControllerStatus> &controllers,
              const std::function<QString(const QString &)> &name_of);
 
-/// Whether after lists the same entries as before, in the same order, so
-/// the menu keeps its entries and only updates their texts and actions. A
-/// rebuild would close a submenu that is open under the pointer.
+/// Whether after lists the same entries with the same actions as before, in
+/// the same order, so the menu keeps its entries and only updates their
+/// texts and shown items. A rebuild would close a submenu that is open
+/// under the pointer.
 bool same_tray_controllers(const std::vector<TrayEntry> &before,
                            const std::vector<TrayEntry> &after);
 

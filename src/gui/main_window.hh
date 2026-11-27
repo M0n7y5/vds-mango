@@ -52,7 +52,8 @@ private:
   void update_tray();
   /// The controller entries at the top of the tray menu.
   void update_tray_menu();
-  void fill_tray_submenu(QMenu *submenu, const TrayEntry &entry);
+  QAction *add_tray_item(QMenu *submenu, TrayAction action,
+                         const QString &address);
   ServiceState service_state() const;
 
   void refresh_controllers();
@@ -127,6 +128,8 @@ private:
   QAction *tray_entries_end_ = nullptr;
   std::vector<TrayEntry> tray_entries_;
   std::vector<QAction *> tray_entry_actions_;
+  /// Per entry, the submenu's actions in the order of TrayEntry::actions.
+  std::vector<std::vector<QAction *>> tray_item_actions_;
   std::optional<TrayIconState> tray_icon_state_;
   /// Missing means armed.
   QHash<QString, bool> low_battery_armed_;

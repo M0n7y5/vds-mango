@@ -2,7 +2,6 @@
 // Copyright (C) 2026 M0n7y5 <17201053+M0n7y5@users.noreply.github.com>
 
 #include <algorithm>
-#include <utility>
 
 #include "tray_model.hh"
 
@@ -25,6 +24,14 @@ QString controller_line(const ControllerStatus &controller,
   return line;
 }
 
+bool same_actions(const TrayEntry &left, const TrayEntry &right) {
+  return std::equal(left.actions.begin(), left.actions.end(),
+                    right.actions.begin(), right.actions.end(),
+                    [](const TrayItem &before, const TrayItem &after) {
+                      return before.action == after.action;
+                    });
+}
+
 } // namespace
 
 std::vector<TrayEntry>
@@ -44,14 +51,12 @@ tray_entries(ServiceState service,
   }
   std::vector<TrayEntry> entries;
   for (const ControllerStatus &controller : controllers) {
-    TrayEntry entry{
-        .text = controller_line(controller, name_of(controller.address)),
-        .address = controller.address};
-    if (controller.connected) {
-      entry.actions.push_back(TrayAction::Test);
-    }
-    entry.actions.push_back(TrayAction::Edit);
-    entries.push_back(std::move(entry));
+    entries.push_back(
+        {.text = controller_line(controller, name_of(controller.address)),
+         .address = controller.address,
+         .actions = {{.action = TrayAction::Test,
+                      .shown = controller.connected},
+                     {.action = TrayAction::Edit}}});
   }
   return entries;
 }
@@ -60,7 +65,8 @@ bool same_tray_controllers(const std::vector<TrayEntry> &before,
                            const std::vector<TrayEntry> &after) {
   return std::equal(before.begin(), before.end(), after.begin(), after.end(),
                     [](const TrayEntry &left, const TrayEntry &right) {
-                      return left.address == right.address;
+                      return left.address == right.address &&
+                             same_actions(left, right);
                     });
 }
 

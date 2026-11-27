@@ -19,6 +19,7 @@ using vds::gui::LowBatteryStep;
 using vds::gui::ServiceState;
 using vds::gui::TrayAction;
 using vds::gui::TrayEntry;
+using vds::gui::TrayItem;
 using vds::gui::TrayIconState;
 
 constexpr const char *kPad = "aa:bb:cc:dd:ee:01";
@@ -46,12 +47,14 @@ std::vector<TrayEntry> entries(ServiceState service,
   return vds::gui::tray_entries(service, list, name_of);
 }
 
-/// The actions of a submenu, such as "test,edit".
+/// The items of a submenu, such as "(test),edit", with a hidden one
+/// in parentheses.
 std::string actions(const TrayEntry &entry) {
   std::string names;
-  for (const TrayAction action : entry.actions) {
+  for (const TrayItem &item : entry.actions) {
+    const std::string name = item.action == TrayAction::Test ? "test" : "edit";
     names += names.empty() ? "" : ",";
-    names += action == TrayAction::Test ? "test" : "edit";
+    names += item.shown ? name : "(" + name + ")";
   }
   return names;
 }
@@ -100,15 +103,16 @@ void test_connected_controller_offers_test_and_edit() {
                "test,edit");
 }
 
-void test_controller_that_is_off_offers_only_edit() {
+void test_controller_that_is_off_keeps_test_in_place_but_hidden() {
   VDS_CHECK_EQ(actions(entries(ServiceState::Running, {off(kPad)}).at(0)),
-               "edit");
+               "(test),edit");
 }
 
 void test_each_controller_gets_its_own_submenu_in_list_order() {
-  VDS_CHECK_EQ(menu(ServiceState::Running, {off(kSteam), connected(kPad)}),
-               "Steam Controller: not connected|steam:FXA1234567B89|edit\n"
-               "DualSense: connected|aa:bb:cc:dd:ee:01|test,edit\n");
+  VDS_CHECK_EQ(
+      menu(ServiceState::Running, {off(kSteam), connected(kPad)}),
+      "Steam Controller: not connected|steam:FXA1234567B89|(test),edit\n"
+      "DualSense: connected|aa:bb:cc:dd:ee:01|test,edit\n");
 }
 
 void test_no_registered_controller_shows_one_line_saying_so() {
@@ -143,16 +147,39 @@ void test_battery_change_keeps_the_open_submenu() {
       entries(ServiceState::Running, {after})));
 }
 
-void test_connecting_keeps_the_neighbours_open_submenu() {
+// Plasma ignored a refilled submenu and kept "Edit…" alone after a connect.
+void test_connecting_keeps_the_submenu_items() {
   VDS_CHECK(vds::gui::same_tray_controllers(
       entries(ServiceState::Running, {off(kPad), off(kSteam)}),
       entries(ServiceState::Running, {connected(kPad), off(kSteam)})));
+}
+
+void test_disconnecting_keeps_the_submenu_items() {
+  VDS_CHECK(vds::gui::same_tray_controllers(
+      entries(ServiceState::Running, {connected(kPad)}),
+      entries(ServiceState::Running, {off(kPad)})));
 }
 
 void test_added_controller_rebuilds_the_menu() {
   VDS_CHECK(!vds::gui::same_tray_controllers(
       entries(ServiceState::Running, {off(kPad)}),
       entries(ServiceState::Running, {off(kPad), off(kSteam)})));
+}
+
+void test_removed_controller_rebuilds_the_menu() {
+  VDS_CHECK(!vds::gui::same_tray_controllers(
+      entries(ServiceState::Running, {off(kPad), off(kSteam)}),
+      entries(ServiceState::Running, {off(kSteam)})));
+}
+
+// Updating in place would index items the old submenu does not have.
+void test_other_offered_actions_rebuild_the_submenu() {
+  const TrayEntry before{.text = "DualSense: not connected",
+                         .address = kPad,
+                         .actions = {{.action = TrayAction::Edit}}};
+  TrayEntry after = before;
+  after.actions.insert(after.actions.begin(), {.action = TrayAction::Test});
+  VDS_CHECK(!vds::gui::same_tray_controllers({before}, {after}));
 }
 
 void test_replaced_controller_rebuilds_its_submenu_for_the_new_address() {
@@ -244,15 +271,18 @@ void run_tests() {
   test_controller_with_unknown_battery_shows_no_level();
   test_controller_that_is_off_says_so_in_its_title();
   test_connected_controller_offers_test_and_edit();
-  test_controller_that_is_off_offers_only_edit();
+  test_controller_that_is_off_keeps_test_in_place_but_hidden();
   test_each_controller_gets_its_own_submenu_in_list_order();
   test_no_registered_controller_shows_one_line_saying_so();
   test_unreachable_service_replaces_the_stale_list();
   test_first_poll_pending_does_not_claim_no_controllers();
   test_status_lines_have_no_actions();
   test_battery_change_keeps_the_open_submenu();
-  test_connecting_keeps_the_neighbours_open_submenu();
+  test_connecting_keeps_the_submenu_items();
+  test_disconnecting_keeps_the_submenu_items();
   test_added_controller_rebuilds_the_menu();
+  test_removed_controller_rebuilds_the_menu();
+  test_other_offered_actions_rebuild_the_submenu();
   test_replaced_controller_rebuilds_its_submenu_for_the_new_address();
   test_first_controller_replaces_the_plain_status_line();
   test_one_connected_controller_shows_the_normal_icon();
