@@ -193,6 +193,16 @@ if(BUILD_TESTS)
   add_test(NAME single_instance COMMAND test_single_instance
            WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 
+  add_executable(test_tray_model tests/test_tray_model.cc
+                                 src/gui/tray_model.cc)
+  target_include_directories(
+    test_tray_model PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
+                            ${CMAKE_CURRENT_SOURCE_DIR}/src
+                            ${CMAKE_CURRENT_SOURCE_DIR}/src/gui)
+  target_link_libraries(test_tray_model PRIVATE vds_test_support Qt6::Core)
+  add_test(NAME tray_model COMMAND test_tray_model
+           WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+
   add_executable(test_steam tests/test_steam.cc)
   target_link_libraries(test_steam PRIVATE vds_test_support vds_steam)
   add_test(NAME steam COMMAND test_steam
@@ -259,7 +269,8 @@ add_executable(
   src/gui/setup_helper.cc
   src/gui/setup_wizard.cc
   src/gui/single_instance.cc
-  src/gui/startup_animation.cc)
+  src/gui/startup_animation.cc
+  src/gui/tray_model.cc)
 add_dependencies(vds-mango vds_build_info_header)
 target_include_directories(vds-mango PRIVATE ${VDS_GENERATED_DIR})
 target_link_libraries(

@@ -273,13 +273,16 @@ void MainWindow::build_tray() {
   if (!QSystemTrayIcon::isSystemTrayAvailable()) {
     return;
   }
-  auto *menu = new QMenu(this);
-  menu->addAction("Open vDS Mango", this, [this] { bring_to_front({}); });
-  menu->addSeparator();
-  menu->addAction(QIcon::fromTheme("application-exit"), "Quit", qApp,
-                  &QApplication::quit);
+  tray_menu_ = new QMenu(this);
+  tray_entries_end_ = tray_menu_->addSeparator();
+  tray_menu_->addAction(QIcon::fromTheme("list-add"), "Add controller…", this,
+                        [this] { open_setup_from_tray(); });
+  tray_menu_->addAction("Open vDS Mango", this, [this] { bring_to_front({}); });
+  tray_menu_->addSeparator();
+  tray_menu_->addAction(QIcon::fromTheme("application-exit"), "Quit", qApp,
+                        &QApplication::quit);
   tray_ = new QSystemTrayIcon(QIcon(":/icons/vds-mango.svg"), this);
-  tray_->setContextMenu(menu);
+  tray_->setContextMenu(tray_menu_);
   connect(tray_, &QSystemTrayIcon::activated, this,
           [this](QSystemTrayIcon::ActivationReason reason) {
             if (reason != QSystemTrayIcon::Trigger) {
@@ -315,6 +318,42 @@ void MainWindow::update_tray() {
     }
   }
   tray_->setToolTip(lines.join('\n'));
+  update_tray_menu();
+}
+
+void MainWindow::update_tray_menu() {
+  std::vector<TrayEntry> entries =
+      tray_entries(service_state(), controllers_,
+                   [this](const QString &address) { return name_of(address); });
+  if (entries == tray_entries_) {
+    return;
+  }
+  for (QAction *action : tray_entry_actions_) {
+    tray_menu_->removeAction(action);
+    action->deleteLater();
+  }
+  tray_entry_actions_.clear();
+  for (const TrayEntry &entry : entries) {
+    auto *action = new QAction(entry.text, tray_menu_);
+    if (entry.kind == TrayEntry::Kind::Test) {
+      connect(action, &QAction::triggered, this,
+              [this, address = entry.address] { test_controller(address); });
+    } else {
+      connect(action, &QAction::triggered, this,
+              [this] { bring_to_front({}); });
+    }
+    tray_menu_->insertAction(tray_entries_end_, action);
+    tray_entry_actions_.push_back(action);
+  }
+  tray_entries_ = std::move(entries);
+}
+
+ServiceState MainWindow::service_state() const {
+  if (!daemon_known_) {
+    return ServiceState::Checking;
+  }
+  return daemon_error_.isEmpty() ? ServiceState::Running
+                                 : ServiceState::Unreachable;
 }
 
 void MainWindow::refresh_controllers() {
@@ -590,6 +629,18 @@ void MainWindow::open_setup() {
   refresh_names();
 }
 
+void MainWindow::open_setup_from_tray() {
+  bring_to_front({});
+  // Queued so the wizard's event loop does not hold up the D-Bus call that
+  // delivered the click. The check runs then, so a second click while the
+  // first is queued only raises the wizard.
+  QTimer::singleShot(0, this, [this] {
+    if (QApplication::activeModalWidget() == nullptr) {
+      open_setup();
+    }
+  });
+}
+
 void MainWindow::open_diagnostics() {
   DiagnosticsDialog dialog(socket_path_, system_info(), this);
   dialog.exec();
@@ -644,7 +695,13 @@ void MainWindow::test_controller(const QString &address) {
         show_message("Sent a test buzz to " + name_of(address) + ".");
       },
       [this](const QString &error) {
-        show_action_error("Test haptics", error);
+        // A message box on a hidden window would show up without context.
+        if (tray_ != nullptr && !isVisible()) {
+          tray_->showMessage("Test haptics", error,
+                             QSystemTrayIcon::Warning);
+        } else {
+          show_action_error("Test haptics", error);
+        }
       });
 }
 

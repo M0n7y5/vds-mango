@@ -14,9 +14,12 @@
 #include "bluez.hh"
 #include "control_client.hh"
 #include "control_protocol.hh"
+#include "tray_model.hh"
 
+class QAction;
 class QGridLayout;
 class QLabel;
+class QMenu;
 class QPushButton;
 class QStackedWidget;
 class QSystemTrayIcon;
@@ -46,6 +49,9 @@ private:
   /// Adds the tray icon, if the desktop has a tray.
   void build_tray();
   void update_tray();
+  /// The controller entries at the top of the tray menu.
+  void update_tray_menu();
+  ServiceState service_state() const;
 
   void refresh_controllers();
   void refresh_status();
@@ -69,6 +75,9 @@ private:
   QString system_info() const;
 
   void open_setup();
+  /// Brings the window to the front and opens the wizard, unless a dialog
+  /// is open already.
+  void open_setup_from_tray();
   void open_diagnostics();
   void test_controller(const QString &address);
   void edit_controller(const QString &address);
@@ -109,6 +118,11 @@ private:
   QLabel *message_ = nullptr;
   /// Null without a tray.
   QSystemTrayIcon *tray_ = nullptr;
+  QMenu *tray_menu_ = nullptr;
+  /// The first action after the controller entries.
+  QAction *tray_entries_end_ = nullptr;
+  std::vector<TrayEntry> tray_entries_;
+  std::vector<QAction *> tray_entry_actions_;
 };
 
 } // namespace vds::gui
