@@ -97,6 +97,25 @@ QToolButton *action_button(const QString &text, const char *icon,
   return button;
 }
 
+/* A guess after a generic bus failure would be wrong more often than not. */
+QString bluetooth_connect_hint(
+    std::optional<BluetoothProblem::Kind> bluetooth_problem) {
+  if (!bluetooth_problem) {
+    return "Press PS to connect";
+  }
+  switch (*bluetooth_problem) {
+  case BluetoothProblem::Kind::SwitchedOff:
+    return "Turn on Bluetooth to connect";
+  case BluetoothProblem::Kind::NoAdapter:
+    return "Needs a Bluetooth adapter";
+  case BluetoothProblem::Kind::NotRunning:
+    return "Start Bluetooth to connect";
+  case BluetoothProblem::Kind::Failed:
+    break;
+  }
+  return "Press PS to connect";
+}
+
 } // namespace
 
 QString profile_label(ControllerProfile profile) {
@@ -267,8 +286,9 @@ ControllerCard::ControllerCard(std::function<void()> on_test,
   layout->addLayout(actions);
 }
 
-void ControllerCard::show_controller(const ControllerStatus &controller,
-                                     const QString &name) {
+void ControllerCard::show_controller(
+    const ControllerStatus &controller, const QString &name,
+    std::optional<BluetoothProblem::Kind> bluetooth_problem) {
   connected_ = controller.connected;
   test_->setVisible(connected_);
   name_->setText(name);
@@ -325,8 +345,9 @@ void ControllerCard::show_controller(const ControllerStatus &controller,
     status_->show_text(Tone::Negative, "Failed");
     detail = controller.error;
   } else {
-    status_->show_text(Tone::Muted, steam ? "Switch it on to connect"
-                                          : "Press PS to connect");
+    status_->show_text(Tone::Muted,
+                       steam ? "Switch it on to connect"
+                             : bluetooth_connect_hint(bluetooth_problem));
   }
   detail_->setText(detail);
   detail_->setToolTip(detail);

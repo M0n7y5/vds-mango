@@ -70,6 +70,11 @@ void show_bluetooth_problem(QLabel *check, const BluetoothProblem &problem) {
   }
 }
 
+std::optional<BluetoothProblem::Kind>
+kind_of(const std::optional<BluetoothProblem> &problem) {
+  return problem ? std::optional(problem->kind) : std::nullopt;
+}
+
 } // namespace
 
 MainWindow::MainWindow(const QString &socket_path)
@@ -350,8 +355,12 @@ void MainWindow::refresh_bluetooth() {
   const auto show = [this](std::optional<BluetoothProblem> problem) {
     bluetooth_pending_ = false;
     bluetooth_known_ = true;
+    const bool cards_change = kind_of(problem) != kind_of(bluetooth_problem_);
     bluetooth_problem_ = std::move(problem);
     update_health();
+    if (cards_change) {
+      update_cards();
+    }
   };
   bluez_.list_devices(
       [show](const std::vector<BluetoothDevice> &) { show(std::nullopt); },
@@ -422,7 +431,8 @@ void MainWindow::rebuild_cards() {
 void MainWindow::update_cards() {
   for (std::size_t index = 0; index < cards_.size(); ++index) {
     cards_[index]->show_controller(controllers_[index],
-                                   name_of(controllers_[index].address));
+                                   name_of(controllers_[index].address),
+                                   kind_of(bluetooth_problem_));
   }
   update_tray();
 }

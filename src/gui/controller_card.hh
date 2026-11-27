@@ -3,6 +3,7 @@
 #pragma once
 
 #include <functional>
+#include <optional>
 #include <span>
 
 #include <QAbstractButton>
@@ -11,6 +12,7 @@
 #include <QPalette>
 #include <QString>
 
+#include "bluez.hh"
 #include "control_protocol.hh"
 
 class QLabel;
@@ -33,7 +35,9 @@ public:
   ControllerCard(std::function<void()> on_test, std::function<void()> on_edit,
                  std::function<void()> on_remove, QWidget *parent);
 
-  void show_controller(const ControllerStatus &controller, const QString &name);
+  /// bluetooth_problem is unset while Bluetooth is on or not checked yet.
+  void show_controller(const ControllerStatus &controller, const QString &name,
+                       std::optional<BluetoothProblem::Kind> bluetooth_problem);
 
 protected:
   void paintEvent(QPaintEvent *event) override;
