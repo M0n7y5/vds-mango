@@ -174,13 +174,14 @@ void test_removed_controller_rebuilds_the_menu() {
       entries(ServiceState::Running, {off(kSteam)})));
 }
 
-// Updating in place would index items the old submenu does not have.
+// Updating in place would keep an item that runs the old action.
 void test_other_offered_actions_rebuild_the_submenu() {
   const TrayEntry before{.text = "DualSense: not connected",
                          .address = kPad,
                          .actions = {{.action = TrayAction::Edit}}};
-  TrayEntry after = before;
-  after.actions.insert(after.actions.begin(), {.action = TrayAction::Test});
+  const TrayEntry after{.text = "DualSense: not connected",
+                        .address = kPad,
+                        .actions = {{.action = TrayAction::Remove}}};
   VDS_CHECK(!vds::gui::same_tray_controllers({before}, {after}));
 }
 
