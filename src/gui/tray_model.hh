@@ -17,7 +17,7 @@ constexpr unsigned kLowBatteryPercent = 15;
 
 enum class ServiceState { Checking, Running, Unreachable };
 
-enum class TrayAction { Test, Edit };
+enum class TrayAction { Test, Edit, Remove };
 
 struct TrayItem {
   TrayAction action = TrayAction::Edit;

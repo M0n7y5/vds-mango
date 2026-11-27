@@ -56,7 +56,8 @@ tray_entries(ServiceState service,
          .address = controller.address,
          .actions = {{.action = TrayAction::Test,
                       .shown = controller.connected},
-                     {.action = TrayAction::Edit}}});
+                     {.action = TrayAction::Edit},
+                     {.action = TrayAction::Remove}}});
   }
   return entries;
 }

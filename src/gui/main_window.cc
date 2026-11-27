@@ -439,6 +439,11 @@ QAction *MainWindow::add_tray_item(QMenu *submenu, TrayAction action,
     return submenu->addAction("Edit…", this, [this, address] {
       open_from_tray([this, address] { edit_controller(address); });
     });
+  case TrayAction::Remove:
+    submenu->addSeparator();
+    return submenu->addAction("Remove…", this, [this, address] {
+      open_from_tray([this, address] { remove_controller(address); });
+    });
   }
   return nullptr;
 }

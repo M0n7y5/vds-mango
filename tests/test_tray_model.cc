@@ -47,12 +47,14 @@ std::vector<TrayEntry> entries(ServiceState service,
   return vds::gui::tray_entries(service, list, name_of);
 }
 
-/// The items of a submenu, such as "(test),edit", with a hidden one
+/// The items of a submenu, such as "(test),edit,remove", with a hidden one
 /// in parentheses.
 std::string actions(const TrayEntry &entry) {
   std::string names;
   for (const TrayItem &item : entry.actions) {
-    const std::string name = item.action == TrayAction::Test ? "test" : "edit";
+    const std::string name = item.action == TrayAction::Test   ? "test"
+                             : item.action == TrayAction::Edit ? "edit"
+                                                               : "remove";
     names += names.empty() ? "" : ",";
     names += item.shown ? name : "(" + name + ")";
   }
@@ -98,21 +100,21 @@ void test_controller_that_is_off_says_so_in_its_title() {
       "Steam Controller: not connected");
 }
 
-void test_connected_controller_offers_test_and_edit() {
+void test_connected_controller_shows_test_edit_and_remove() {
   VDS_CHECK_EQ(actions(entries(ServiceState::Running, {connected(kPad)}).at(0)),
-               "test,edit");
+               "test,edit,remove");
 }
 
 void test_controller_that_is_off_keeps_test_in_place_but_hidden() {
   VDS_CHECK_EQ(actions(entries(ServiceState::Running, {off(kPad)}).at(0)),
-               "(test),edit");
+               "(test),edit,remove");
 }
 
 void test_each_controller_gets_its_own_submenu_in_list_order() {
   VDS_CHECK_EQ(
       menu(ServiceState::Running, {off(kSteam), connected(kPad)}),
-      "Steam Controller: not connected|steam:FXA1234567B89|(test),edit\n"
-      "DualSense: connected|aa:bb:cc:dd:ee:01|test,edit\n");
+      "Steam Controller: not connected|steam:FXA1234567B89|(test),edit,remove\n"
+      "DualSense: connected|aa:bb:cc:dd:ee:01|test,edit,remove\n");
 }
 
 void test_no_registered_controller_shows_one_line_saying_so() {
@@ -270,7 +272,7 @@ void run_tests() {
   test_charging_controller_title_says_it_charges();
   test_controller_with_unknown_battery_shows_no_level();
   test_controller_that_is_off_says_so_in_its_title();
-  test_connected_controller_offers_test_and_edit();
+  test_connected_controller_shows_test_edit_and_remove();
   test_controller_that_is_off_keeps_test_in_place_but_hidden();
   test_each_controller_gets_its_own_submenu_in_list_order();
   test_no_registered_controller_shows_one_line_saying_so();
