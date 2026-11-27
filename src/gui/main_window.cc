@@ -643,7 +643,7 @@ void MainWindow::play_startup_animation() {
 }
 
 QString MainWindow::name_of(const QString &address) const {
-  return names_.value(address, "DualSense controller");
+  return controller_name(names_, address);
 }
 
 QString MainWindow::system_info() const {

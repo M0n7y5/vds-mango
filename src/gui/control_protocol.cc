@@ -117,6 +117,13 @@ bool kernel_fix_missing(const ControllerStatus &controller) {
                                kBluetoothSharingUnsupported.size()));
 }
 
+QString controller_name(const QHash<QString, QString> &names,
+                        const QString &address) {
+  return names.value(address, is_steam_address(address.toStdString())
+                                  ? "Steam Controller"
+                                  : "DualSense controller");
+}
+
 QByteArray list_request() {
   return request_line(QJsonObject{{"command", "list"}});
 }

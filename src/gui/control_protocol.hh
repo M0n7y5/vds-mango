@@ -6,6 +6,7 @@
 #include <vector>
 
 #include <QByteArray>
+#include <QHash>
 #include <QString>
 
 #include "vds_config.hh"
@@ -76,6 +77,11 @@ struct DaemonStatus {
 /// The controller cannot connect because this kernel's hid-playstation lacks
 /// the Bluetooth audio fix.
 bool kernel_fix_missing(const ControllerStatus &controller);
+
+/// The name bluetoothd gave the controller, or one that fits its kind while
+/// that is not known.
+QString controller_name(const QHash<QString, QString> &names,
+                        const QString &address);
 
 /// What the user needs when kernel_fix_missing() holds.
 inline const QString kKernelRequirement =

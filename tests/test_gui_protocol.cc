@@ -537,6 +537,12 @@ void test_buzz_is_refused_while_a_game_plays_through_the_controller() {
   VDS_CHECK(daemon.buzzed().empty());
 }
 
+void test_steam_controller_without_a_known_name_is_called_one() {
+  VDS_CHECK_EQ(
+      vds::gui::controller_name({}, "steam:FXA1234567B89").toStdString(),
+      "Steam Controller");
+}
+
 void run_tests() {
   test_daemon_accepts_the_attach_request_and_gui_reads_the_reply();
   test_listed_controller_keeps_the_attached_profile_and_ports();
@@ -569,6 +575,7 @@ void run_tests() {
   test_buzz_request_names_the_connected_controller_to_vdsd();
   test_buzz_for_a_controller_that_is_off_surfaces_the_daemon_error_text();
   test_buzz_is_refused_while_a_game_plays_through_the_controller();
+  test_steam_controller_without_a_known_name_is_called_one();
 }
 
 } // namespace vds::test
