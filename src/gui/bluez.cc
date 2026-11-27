@@ -100,6 +100,7 @@ void Bluez::list_devices(DevicesHandler on_devices,
          }
          std::vector<BluetoothDevice> devices;
          bool powered = false;
+         adapter_path_.clear();
          const ManagedObjects objects = reply.value();
          for (auto object = objects.begin(); object != objects.end();
               ++object) {
@@ -115,6 +116,7 @@ void Bluez::list_devices(DevicesHandler on_devices,
            }
          }
          if (adapter_path_.isEmpty()) {
+           discovering_ = false;
            on_problem({.kind = BluetoothProblem::Kind::NoAdapter,
                        .text = "This computer has no Bluetooth adapter."});
            return;
