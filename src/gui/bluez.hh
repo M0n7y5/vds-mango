@@ -20,6 +20,14 @@ struct BluetoothDevice {
   bool supported_controller = false;
 };
 
+/// Why bluetoothd cannot list DualSenses right now.
+struct BluetoothProblem {
+  enum class Kind { NotRunning, NoAdapter, SwitchedOff, Failed };
+  Kind kind;
+  /// One sentence naming the problem, the bus error for Failed.
+  QString text;
+};
+
 /// Talks to bluetoothd over the system bus without blocking. Every call ends
 /// in exactly one of its two handlers.
 class Bluez : public QObject {
@@ -27,11 +35,12 @@ public:
   using DevicesHandler = std::function<void(std::vector<BluetoothDevice>)>;
   using DoneHandler = std::function<void()>;
   using ErrorHandler = std::function<void(const QString &)>;
+  using ProblemHandler = std::function<void(const BluetoothProblem &)>;
 
   explicit Bluez(QObject *parent = nullptr);
   ~Bluez() override;
 
-  void list_devices(DevicesHandler on_devices, ErrorHandler on_error);
+  void list_devices(DevicesHandler on_devices, ProblemHandler on_problem);
   void start_discovery();
   void pair_and_trust(const BluetoothDevice &device, DoneHandler on_done,
                       ErrorHandler on_error);

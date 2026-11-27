@@ -79,15 +79,23 @@ Bluez::~Bluez() {
   }
 }
 
-void Bluez::list_devices(DevicesHandler on_devices, ErrorHandler on_error) {
+void Bluez::list_devices(DevicesHandler on_devices,
+                         ProblemHandler on_problem) {
   call(this,
        QDBusMessage::createMethodCall(kBluezService, "/",
                                       "org.freedesktop.DBus.ObjectManager",
                                       "GetManagedObjects"),
-       -1, [this, on_devices, on_error](const QDBusPendingCall &finished) {
+       -1, [this, on_devices, on_problem](const QDBusPendingCall &finished) {
          const QDBusPendingReply<ManagedObjects> reply = finished;
          if (reply.isError()) {
-           on_error(error_text(reply.error()));
+           // A bluetoothd that went away took the session with it, and a
+           // second StartDiscovery to a live one is harmless.
+           discovering_ = false;
+           on_problem({.kind = reply.error().type() ==
+                                       QDBusError::ServiceUnknown
+                                   ? BluetoothProblem::Kind::NotRunning
+                                   : BluetoothProblem::Kind::Failed,
+                       .text = error_text(reply.error())});
            return;
          }
          std::vector<BluetoothDevice> devices;
@@ -107,11 +115,15 @@ void Bluez::list_devices(DevicesHandler on_devices, ErrorHandler on_error) {
            }
          }
          if (adapter_path_.isEmpty()) {
-           on_error("This computer has no Bluetooth adapter.");
+           on_problem({.kind = BluetoothProblem::Kind::NoAdapter,
+                       .text = "This computer has no Bluetooth adapter."});
            return;
          }
          if (!powered) {
-           on_error("Bluetooth is switched off. Turn it on to continue.");
+           // Powering off ends every discovery session the adapter had.
+           discovering_ = false;
+           on_problem({.kind = BluetoothProblem::Kind::SwitchedOff,
+                       .text = "Bluetooth is switched off."});
            return;
          }
          on_devices(std::move(devices));
@@ -156,15 +168,16 @@ void Bluez::trust(const QString &path, DoneHandler on_done,
       kBluezService, path, "org.freedesktop.DBus.Properties", "Set");
   message << kDeviceInterface << "Trusted"
           << QVariant::fromValue(QDBusVariant(true));
-  call(this, message, -1, [on_done, on_error](const QDBusPendingCall &finished) {
-    const QDBusPendingReply<> reply = finished;
-    if (reply.isError()) {
-      on_error("Could not mark the controller as trusted: " +
-               error_text(reply.error()));
-      return;
-    }
-    on_done();
-  });
+  call(this, message, -1,
+       [on_done, on_error](const QDBusPendingCall &finished) {
+         const QDBusPendingReply<> reply = finished;
+         if (reply.isError()) {
+           on_error("Could not mark the controller as trusted: " +
+                    error_text(reply.error()));
+           return;
+         }
+         on_done();
+       });
 }
 
 } // namespace vds::gui

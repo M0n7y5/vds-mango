@@ -50,6 +50,26 @@ void show_check(QLabel *check, Tone tone, const QString &text,
   check->setToolTip(problem);
 }
 
+void show_bluetooth_problem(QLabel *check, const BluetoothProblem &problem) {
+  const QString needed = "A DualSense needs Bluetooth to connect, a Steam "
+                         "Controller on its Puck does not.";
+  switch (problem.kind) {
+  case BluetoothProblem::Kind::SwitchedOff:
+    show_check(check, Tone::Muted, "Bluetooth off", needed);
+    break;
+  case BluetoothProblem::Kind::NoAdapter:
+    show_check(check, Tone::Muted, "No Bluetooth adapter", needed);
+    break;
+  case BluetoothProblem::Kind::NotRunning:
+    show_check(check, Tone::Muted, "Bluetooth not running", needed);
+    break;
+  case BluetoothProblem::Kind::Failed:
+    show_check(check, Tone::Warning, "Bluetooth unavailable",
+               problem.text + "\n" + needed);
+    break;
+  }
+}
+
 } // namespace
 
 MainWindow::MainWindow(const QString &socket_path)
@@ -327,14 +347,15 @@ void MainWindow::refresh_bluetooth() {
     return;
   }
   bluetooth_pending_ = true;
-  const auto show = [this](const QString &problem) {
+  const auto show = [this](std::optional<BluetoothProblem> problem) {
     bluetooth_pending_ = false;
     bluetooth_known_ = true;
-    bluetooth_problem_ = problem;
+    bluetooth_problem_ = std::move(problem);
     update_health();
   };
   bluez_.list_devices(
-      [show](const std::vector<BluetoothDevice> &) { show({}); }, show);
+      [show](const std::vector<BluetoothDevice> &) { show(std::nullopt); },
+      show);
 }
 
 void MainWindow::refresh_names() {
@@ -453,18 +474,15 @@ void MainWindow::update_health() {
 
   if (!bluetooth_known_) {
     show_check(bluetooth_check_, Tone::Muted, "Checking Bluetooth");
-  } else if (bluetooth_problem_.isEmpty()) {
+  } else if (!bluetooth_problem_) {
     show_check(bluetooth_check_, Tone::Positive, "Bluetooth on");
   } else {
-    show_check(bluetooth_check_, Tone::Negative, "Bluetooth unavailable",
-               bluetooth_problem_);
+    show_bluetooth_problem(bluetooth_check_, *bluetooth_problem_);
   }
 
-  const QString &text = !service_ok                  ? daemon_error_
-                        : !kernel_problem.isEmpty() ? kernel_problem
-                                                    : bluetooth_problem_;
+  const QString &text = !service_ok ? daemon_error_ : kernel_problem;
   banner_text_->setText(text);
-  // Setup can start the service. It cannot change the kernel or Bluetooth.
+  // Setup can start the service. It cannot change the kernel.
   banner_setup_->setVisible(!service_ok);
   banner_->setVisible(!text.isEmpty());
 }
@@ -517,10 +535,9 @@ QString MainWindow::system_info() const {
                (!daemon_status_.kernel_fix    ? "not checked yet"
                 : *daemon_status_.kernel_fix ? "yes"
                                              : "no");
-  lines << "Bluetooth: " +
-               (!bluetooth_known_             ? "not checked yet"
-                : bluetooth_problem_.isEmpty() ? "on"
-                                               : bluetooth_problem_);
+  lines << "Bluetooth: " + (!bluetooth_known_     ? "not checked yet"
+                            : !bluetooth_problem_ ? "on"
+                                                  : bluetooth_problem_->text);
   if (controllers_.empty()) {
     lines << "Controllers: none registered";
   }

@@ -142,6 +142,29 @@ struct Candidate {
   std::optional<BluetoothDevice> bluetooth = std::nullopt;
 };
 
+QString bluetooth_notice(const BluetoothProblem &problem) {
+  QString notice;
+  switch (problem.kind) {
+  case BluetoothProblem::Kind::SwitchedOff:
+    notice = problem.text + " A DualSense cannot be found or paired until "
+                            "you turn it on.";
+    break;
+  case BluetoothProblem::Kind::NoAdapter:
+    notice = problem.text + " A DualSense cannot be found or paired "
+                            "without one.";
+    break;
+  case BluetoothProblem::Kind::NotRunning:
+    notice = problem.text + " A DualSense cannot be found or paired until "
+                            "the Bluetooth service is started.";
+    break;
+  case BluetoothProblem::Kind::Failed:
+    notice = "Bluetooth cannot be used right now, so a DualSense cannot be "
+             "found or paired.";
+    break;
+  }
+  return notice + " A Steam Controller on its Puck can still be added.";
+}
+
 class ControllerPage : public QWizardPage {
 public:
   ControllerPage(ControlClient &client, Bluez &bluez, QString &added_address)
@@ -152,6 +175,8 @@ public:
                 "Controller: plug in its Puck and switch the controller on.");
     setButtonText(QWizard::NextButton, "Add controller");
 
+    bluetooth_ = new StatusRow(this);
+    bluetooth_->hide();
     list_ = new QListWidget(this);
     status_ = wrapped_label("Looking for controllers…", this);
     claim_hint_ = wrapped_label("Steam Controller not listed? Steam is "
@@ -163,6 +188,7 @@ public:
     claim_row->addWidget(claim_);
 
     auto *layout = new QVBoxLayout(this);
+    layout->addWidget(bluetooth_);
     layout->addWidget(list_, 1);
     layout->addWidget(status_);
     layout->addLayout(claim_row);
@@ -284,10 +310,17 @@ private:
             }
           }
           bluez_.start_discovery();
-          show_candidates(std::move(candidates), {});
+          bluetooth_->hide();
+          show_candidates(std::move(candidates));
         },
-        [this, found](const QString &error) {
-          show_candidates(found, error);
+        [this, found](const BluetoothProblem &problem) {
+          bluetooth_->show_state(false, bluetooth_notice(problem));
+          bluetooth_->setToolTip(problem.kind ==
+                                         BluetoothProblem::Kind::Failed
+                                     ? problem.text
+                                     : QString());
+          bluetooth_->show();
+          show_candidates(found);
         });
   }
 
@@ -302,11 +335,7 @@ private:
            (candidate.bluetooth->paired ? "  (paired)" : "  (ready to pair)");
   }
 
-  void show_candidates(std::vector<Candidate> candidates,
-                       const QString &problem) {
-    if (!problem.isEmpty()) {
-      status_->setText(problem);
-    }
+  void show_candidates(std::vector<Candidate> candidates) {
     const auto paired = [](const Candidate &candidate) {
       return candidate.bluetooth && candidate.bluetooth->paired;
     };
@@ -334,10 +363,8 @@ private:
     if (list_->currentRow() < 0 && list_->count() == 1) {
       list_->setCurrentRow(0);
     }
-    if (problem.isEmpty()) {
-      status_->setText(candidates_.empty() ? "Looking for controllers…"
-                                           : QString());
-    }
+    status_->setText(candidates_.empty() ? "Looking for controllers…"
+                                         : QString());
     emit completeChanged();
   }
 
@@ -346,6 +373,7 @@ private:
   QString &added_address_;
   QTimer timer_;
   QListWidget *list_ = nullptr;
+  StatusRow *bluetooth_ = nullptr;
   QLabel *status_ = nullptr;
   QLabel *claim_hint_ = nullptr;
   QPushButton *claim_ = nullptr;

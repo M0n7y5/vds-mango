@@ -2,6 +2,7 @@
 // Copyright (C) 2026 M0n7y5 <17201053+M0n7y5@users.noreply.github.com>
 #pragma once
 
+#include <optional>
 #include <vector>
 
 #include <QByteArray>
@@ -57,7 +58,8 @@ private:
   void show_action_error(const QString &title, const QString &error);
   /// Shows text beside the checks for a few seconds.
   void show_message(const QString &text);
-  /// The three checks along the bottom, and the banner while one fails.
+  /// The three checks along the bottom, and the banner while the service or
+  /// kernel check fails.
   void update_health();
   void offer_setup_once();
   /// Plays the logo over the window, unless the desktop has animations
@@ -83,7 +85,7 @@ private:
   QTimer message_timer_;
   QString daemon_error_;
   DaemonStatus daemon_status_;
-  QString bluetooth_problem_;
+  std::optional<BluetoothProblem> bluetooth_problem_;
   bool list_pending_ = false;
   bool bluetooth_pending_ = false;
   bool daemon_known_ = false;
