@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="5 -5 400 400">
+  <title>Mango Gamepad</title>
+  <path d="M200 98 C199 88 197 80 193 71" fill="none" stroke="#6B3A1E" stroke-width="7" stroke-linecap="round"/>
+  <path d="M195 79 C176 50 136 42 108 56 C128 86 168 94 195 79 Z" fill="#2E9E4F"/>
+  <path d="M188 76 C165 66 140 61 120 60" fill="none" stroke="#1F6B33" stroke-width="2.5" stroke-linecap="round"/>
+  <path d="M205 95 C280 85 340 150 335 235 C330 315 265 350 200 345 C120 340 65 285 75 215 C82 160 120 150 150 130 C170 115 180 98 205 95 Z" fill="#FFB627"/>
+  <!-- The blush is the mango outline cut by a circle (305 140, r 125), as plain
+       geometry: Qt's SVG engine, which also draws desktop icons, ignores clipPath. -->
+  <path d="M186.30 100.82 C191.67 97.95 197.69 95.88 205.00 95.00 C280.00 85.00 340.00 150.00 335.00 235.00 C334.39 244.79 332.88 253.90 330.58 262.35 A125 125 0 0 1 186.30 100.82 Z" fill="#F2622E"/>
+  <ellipse cx="125" cy="190" rx="16" ry="30" fill="#FFFFFF" opacity="0.35" transform="rotate(25 125 190)"/>
+  <g fill="#2B1810">
+    <rect x="134" y="200" width="24" height="68" rx="6"/>
+    <rect x="112" y="222" width="68" height="24" rx="6"/>
+    <circle cx="262" cy="208" r="12"/>
+    <circle cx="262" cy="260" r="12"/>
+    <circle cx="236" cy="234" r="12"/>
+    <circle cx="288" cy="234" r="12"/>
+    <rect x="180" y="292" width="18" height="8" rx="4"/>
+    <rect x="206" y="292" width="18" height="8" rx="4"/>
+  </g>
+</svg>

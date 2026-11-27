@@ -24,8 +24,10 @@
 !/data/animations/*.json
 
 !/docs/
+!/docs/*.html
 !/docs/*.png
 !/docs/*.svg
+!/docs/sitemap.xml
 
 !/include/
 !/include/**/

@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>vDS Mango: DualSense haptics over Bluetooth on Linux</title>
+<meta name="description" content="vDS Mango makes a Bluetooth DualSense appear as a USB one on Linux, so games get haptic feedback, adaptive triggers, the speaker and the microphone.">
+<link rel="canonical" href="https://m0n7y5.github.io/vds-mango/">
+<link rel="icon" href="vds-mango.svg" type="image/svg+xml">
+<!-- Open Graph, Twitter cards and JSON-LD need absolute URLs. Browsers never load these. -->
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="vDS Mango">
+<meta property="og:locale" content="en_US">
+<meta property="og:title" content="vDS Mango: DualSense haptics over Bluetooth on Linux">
+<meta property="og:description" content="vDS Mango makes a Bluetooth DualSense appear as a USB one on Linux, so games get haptic feedback, adaptive triggers, the speaker and the microphone.">
+<meta property="og:url" content="https://m0n7y5.github.io/vds-mango/">
+<meta property="og:image" content="https://m0n7y5.github.io/vds-mango/social.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:alt" content="The vDS Mango wordmark next to the app window with a DualSense and a Steam Controller">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="vDS Mango: DualSense haptics over Bluetooth on Linux">
+<meta name="twitter:description" content="vDS Mango makes a Bluetooth DualSense appear as a USB one on Linux, so games get haptic feedback, adaptive triggers, the speaker and the microphone.">
+<meta name="twitter:image" content="https://m0n7y5.github.io/vds-mango/social.png">
+<meta name="twitter:image:alt" content="The vDS Mango wordmark next to the app window with a DualSense and a Steam Controller">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "vDS Mango",
+  "description": "vDS Mango makes a Bluetooth DualSense appear as a USB one on Linux, so games get haptic feedback, adaptive triggers, the speaker and the microphone.",
+  "operatingSystem": "Linux",
+  "applicationCategory": "UtilitiesApplication",
+  "url": "https://m0n7y5.github.io/vds-mango/",
+  "downloadUrl": "https://aur.archlinux.org/packages/vds-mango",
+  "sameAs": "https://github.com/M0n7y5/vds-mango",
+  "license": "https://github.com/M0n7y5/vds-mango/blob/main/LICENSE",
+  "isAccessibleForFree": true,
+  "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"},
+  "image": "https://m0n7y5.github.io/vds-mango/social.png",
+  "screenshot": [
+    "https://m0n7y5.github.io/vds-mango/main-window.png",
+    "https://m0n7y5.github.io/vds-mango/edit-controller.png"
+  ]
+}
+</script>
+<style>
+:root {
+  --bg: #fffaf3;
+  --fg: #2b1810;
+  --muted: #7a4e33;
+  --accent: #f2622e;
+  --line: #eadbc8;
+  --note: #fff0cc;
+  --code: #f5ebdd;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1c120c;
+    --fg: #f4e8da;
+    --muted: #cdb096;
+    --line: #4a3324;
+    --note: #33200f;
+    --code: #2e1d13;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 1.0625rem/1.65 system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", sans-serif;
+}
+main, footer {
+  max-width: 54rem;
+  margin: 0 auto;
+  padding: 0 1.25rem;
+}
+p, ul, ol, aside, pre { max-width: 40rem; }
+h1 { margin: 3.5rem 0 1.5rem; line-height: 0; }
+h2 {
+  margin: 3.5rem 0 0.75rem;
+  font-size: 1.35rem;
+  line-height: 1.3;
+}
+img { max-width: 100%; height: auto; }
+.lede { font-size: 1.2rem; }
+figure { margin: 2.5rem 0; }
+figure img {
+  display: block;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+figcaption { margin-top: 0.6rem; color: var(--muted); font-size: 0.95rem; }
+aside {
+  margin: 2.5rem 0;
+  padding: 1rem 1.25rem;
+  background: var(--note);
+  border-left: 4px solid var(--accent);
+  border-radius: 0 6px 6px 0;
+}
+aside p { margin: 0.4rem 0; }
+code, pre { font-family: ui-monospace, "JetBrains Mono", "DejaVu Sans Mono", monospace; font-size: 0.92em; }
+:not(pre) > code { background: var(--code); padding: 0.1em 0.35em; border-radius: 4px; white-space: nowrap; }
+pre {
+  background: var(--code);
+  padding: 0.9rem 1.1rem;
+  border-radius: 6px;
+  font-size: 1.05rem;
+  overflow-x: auto;
+}
+li { margin: 0.35rem 0; }
+ol li::marker { color: var(--muted); font-weight: 600; }
+a {
+  color: inherit;
+  text-decoration-color: var(--accent);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+}
+a:hover { text-decoration-thickness: 3px; }
+a:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+footer {
+  margin-top: 4rem;
+  padding-top: 1.5rem;
+  padding-bottom: 3rem;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+footer p { margin: 0.4rem 0; }
+</style>
+</head>
+<body>
+<main>
+<h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="logo-dark.svg">
+    <img src="logo.svg" width="460" height="153" alt="vDS Mango: Virtual DualSense for Linux">
+  </picture>
+</h1>
+
+<p class="lede">vDS Mango makes a DualSense on Bluetooth look like one on a cable.</p>
+<p>Games on Linux get what the cable gives them: haptic feedback, adaptive triggers, the speaker, the microphone and the headphone jack. Only firmware updates still need the cable.</p>
+
+<figure>
+  <img src="main-window.png" width="837" height="520" alt="The vDS Mango window with a DualSense and a Steam Controller">
+</figure>
+
+<aside aria-label="Supported systems">
+  <p><strong>CachyOS is the only supported system at the moment.</strong> vDS Mango needs a kernel fix that so far only the CachyOS kernels carry: <code>linux-cachyos</code> 7.3.6 or newer, or <code>linux-cachyos-rc</code> 7.4-rc4 or newer. On any other kernel the controller is not connected. See the <a href="https://github.com/M0n7y5/vds-mango#requirements">requirements</a>.</p>
+  <p>This is a beta, tested on one machine with one DualSense.</p>
+</aside>
+
+<h2 id="install">Install</h2>
+<pre><code>paru -S vds-mango</code></pre>
+<p>Any other AUR helper works too. The package starts the <code>vdsd</code> service and installs the udev and audio rules. Get it from <a href="https://aur.archlinux.org/packages/vds-mango">the AUR</a>, or read the source <a href="https://github.com/M0n7y5/vds-mango">on GitHub</a>.</p>
+
+<h2 id="features">Features</h2>
+<ul>
+  <li>Haptics, adaptive triggers, speaker, microphone and headset over Bluetooth.</li>
+  <li>A setup wizard that pairs the controller and registers it.</li>
+  <li>Battery level, firmware version and a test buzz for each controller.</li>
+  <li>A haptics delay you choose per controller, from about 78 ms down to about 33 ms on the test machine.</li>
+  <li>No kernel module. It uses <code>vhci_hcd</code>, which ships with the kernel, so there is nothing to build or to sign for Secure Boot.</li>
+  <li>Other Bluetooth devices keep working.</li>
+</ul>
+
+<h2 id="set-up">Set up</h2>
+<ol>
+  <li>Open vDS Mango from the application menu.</li>
+  <li>Hold Create and PS until the light bar blinks rapidly, then pick the controller in the wizard. It pairs, trusts and registers it.</li>
+  <li>Press PS. Games now see a USB DualSense.</li>
+</ol>
+<p>Press PS again after the computer wakes from sleep.</p>
+
+<figure>
+  <img src="edit-controller.png" width="837" height="520" loading="lazy" alt="The Edit controller dialog">
+  <figcaption>Edit sets which model games see, which virtual ports the controller may use, and the haptics and speaker delay.</figcaption>
+</figure>
+
+<h2 id="steam-controller">Steam Controller</h2>
+<p>A 2026 Steam Controller on its wireless Puck can be added in the same wizard. It appears as a DualSense. This part is experimental. The README lists <a href="https://github.com/M0n7y5/vds-mango#steam-controller">what is mapped</a>.</p>
+
+<h2 id="problems">Reporting problems</h2>
+<p>Report bugs on the <a href="https://discord.gg/cachyos-862292009423470592">CachyOS Discord</a>. The GitHub issue tracker is not open yet. Paste the summary from Diagnostics &gt; Copy system info.</p>
+<p>The <a href="https://github.com/M0n7y5/vds-mango#readme">README</a> covers the rest: the app, the command line, how it works and building from source.</p>
+
+<h2 id="credits">Credits</h2>
+<p>vDS Mango is a Linux-only fork of <a href="https://github.com/hurryman2212/vds">vDS</a> by Jihong Min, with a graphical app and no kernel module to build. You can <a href="https://github.com/sponsors/hurryman2212">sponsor him</a>. Microphone and headphone support were contributed to vDS by <a href="https://github.com/TechAntohere">@TechAntohere</a>. The DualSense output and haptics packet handling is based on <a href="https://github.com/awalol/DS5Dongle">DS5Dongle</a> and protocol captures.</p>
+</main>
+
+<footer>
+  <p>vDS Mango is released under the <a href="https://github.com/M0n7y5/vds-mango/blob/main/LICENSE">MIT License</a>.</p>
+  <p>vDS Mango is not affiliated with Sony Interactive Entertainment or Valve.</p>
+</footer>
+</body>
+</html>
