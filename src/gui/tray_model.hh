@@ -11,6 +11,10 @@
 
 namespace vds::gui {
 
+/// At or below this a battery that is not charging counts as low, on the
+/// card and in the tray alike.
+constexpr unsigned kLowBatteryPercent = 15;
+
 enum class ServiceState { Checking, Running, Unreachable };
 
 struct TrayEntry {
@@ -37,5 +41,15 @@ enum class TrayIconState { Connected, Idle, Unreachable };
 
 TrayIconState tray_icon_state(ServiceState service,
                               const std::vector<ControllerStatus> &controllers);
+
+struct LowBatteryStep {
+  bool notify = false;
+  /// Whether the next drop to a low battery notifies.
+  bool armed = true;
+};
+
+/// Decides on the low-battery notice from the controller's newly polled
+/// state and whether its notice was armed.
+LowBatteryStep low_battery_step(bool armed, const ControllerStatus &now);
 
 } // namespace vds::gui

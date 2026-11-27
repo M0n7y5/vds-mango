@@ -17,6 +17,7 @@
 #include <QVBoxLayout>
 
 #include "controller_card.hh"
+#include "tray_model.hh"
 
 namespace vds::gui {
 
@@ -45,7 +46,6 @@ constexpr qreal kStatusRadius = 11;
 constexpr qreal kChipRadius = 6;
 constexpr QSize kPictureSize(112, 78);
 constexpr QSize kStateIconSize(20, 20);
-constexpr unsigned kLowBatteryPercent = 15;
 
 // QPalette::Mid nearly vanishes against the card on dark colour schemes.
 QColor outline_color(const QPalette &palette) {

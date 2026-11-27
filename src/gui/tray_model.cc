@@ -69,4 +69,18 @@ tray_icon_state(ServiceState service,
   return any_connected ? TrayIconState::Connected : TrayIconState::Idle;
 }
 
+LowBatteryStep low_battery_step(bool armed, const ControllerStatus &now) {
+  if (!now.connected || now.charging) {
+    return {.notify = false, .armed = true};
+  }
+  // An unknown level, such as a charging fault, says nothing either way.
+  if (!now.battery) {
+    return {.notify = false, .armed = armed};
+  }
+  if (*now.battery > kLowBatteryPercent) {
+    return {.notify = false, .armed = true};
+  }
+  return {.notify = armed, .armed = false};
+}
+
 } // namespace vds::gui

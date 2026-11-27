@@ -58,6 +58,8 @@ private:
   void refresh_bluetooth();
   void refresh_names();
   void show_controllers(std::vector<ControllerStatus> controllers);
+  /// Shows the tray's low-battery notice where low_battery_step() says so.
+  void notify_low_batteries();
   void rebuild_cards();
   void update_cards();
   void show_daemon_error(const QString &error);
@@ -124,6 +126,8 @@ private:
   std::vector<TrayEntry> tray_entries_;
   std::vector<QAction *> tray_entry_actions_;
   std::optional<TrayIconState> tray_icon_state_;
+  /// Missing means armed.
+  QHash<QString, bool> low_battery_armed_;
 };
 
 } // namespace vds::gui

@@ -488,6 +488,27 @@ void MainWindow::show_controllers(std::vector<ControllerStatus> controllers) {
   }
   update_cards();
   controller_pages_->setCurrentIndex(controllers_.empty() ? 0 : 1);
+  notify_low_batteries();
+}
+
+void MainWindow::notify_low_batteries() {
+  if (tray_ == nullptr) {
+    return;
+  }
+  QHash<QString, bool> armed;
+  for (const ControllerStatus &controller : controllers_) {
+    const LowBatteryStep step = low_battery_step(
+        low_battery_armed_.value(controller.address, true), controller);
+    armed.insert(controller.address, step.armed);
+    if (step.notify) {
+      tray_->showMessage("Low battery",
+                         name_of(controller.address) + " is at " +
+                             QString::number(*controller.battery) +
+                             "%. Charge it soon.",
+                         QSystemTrayIcon::Warning);
+    }
+  }
+  low_battery_armed_ = std::move(armed);
 }
 
 void MainWindow::rebuild_cards() {
