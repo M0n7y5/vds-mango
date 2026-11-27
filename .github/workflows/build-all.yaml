@@ -23,10 +23,10 @@ on:
 permissions:
   contents: read
 
-# A dispatched run may be publishing a release, so only push and pull request
-# runs give way to a newer run on the same ref.
+# A dispatched run may be publishing a release. The new run decides whether
+# to cancel, so dispatched runs get their own group, which is never cancelled.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
 jobs:
