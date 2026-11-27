@@ -104,6 +104,8 @@ Press PS again after the computer wakes from sleep.
   bug reports.
 - With a system tray, closing the window keeps the app in the tray. Quit
   it from the tray menu or with Ctrl+Q. Opening it again shows the window.
+- The tray menu shows each controller and its battery, with **Test** for a
+  connected one. A notice warns once when its battery runs low.
 
 ## Steam Controller
 
