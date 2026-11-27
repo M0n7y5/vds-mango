@@ -115,7 +115,7 @@ jobs:
 
   release:
     name: GitHub Release
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && github.ref_type == 'tag'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -134,6 +134,17 @@ jobs:
           raw_version="$(./scripts/generate-version.sh)"
           echo "raw_version=${raw_version}" >> "$GITHUB_OUTPUT"
           echo "Raw version: ${raw_version}"
+
+      - name: Require a release tag
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          RAW_VERSION: ${{ steps.version.outputs.raw_version }}
+        run: |
+          release_form='^[0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta|rc)[0-9]+)?$'
+          if [ "$RAW_VERSION" != "$REF_NAME" ] || ! [[ "$RAW_VERSION" =~ $release_form ]]; then
+            echo "::error::Version '${RAW_VERSION}' is not the release tag '${REF_NAME}' or not of the form X.Y.Z[-alphaN|-betaN|-rcN]"
+            exit 1
+          fi
 
       - name: Download packages
         uses: actions/download-artifact@v8
