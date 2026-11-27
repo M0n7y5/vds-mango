@@ -98,14 +98,16 @@ Press PS again after the computer wakes from sleep.
   use, and the haptics and speaker delay. Smaller delays react sooner, and
   the lowest one can make the speaker crackle.
 - The line along the bottom checks the service, the kernel fix and Bluetooth.
-  A banner explains whichever one fails.
+  A banner explains a failing service or kernel fix.
 - A click or any key skips the animation when the app opens.
 - **Diagnostics** holds the trace switches and a summary of your setup for
   bug reports.
 - With a system tray, closing the window keeps the app in the tray. Quit
   it from the tray menu or with Ctrl+Q. Opening it again shows the window.
-- The tray menu shows each controller and its battery, with **Test** for a
-  connected one. A notice warns once when its battery runs low.
+- The tray menu lists each controller and its battery, with **Test** while
+  it is connected, **Edit** and **Remove**. A notice warns once when a
+  battery runs low. The icon is gray while no controller is connected and
+  has a red mark while the service is not running.
 
 ## Steam Controller
 
