@@ -37,10 +37,11 @@ tray_entries(ServiceState service,
              const std::vector<ControllerStatus> &controllers,
              const std::function<QString(const QString &)> &name_of);
 
-/// Whether the menu built for before still fits after once its texts are
-/// updated. A rebuild would close a submenu that is open under the pointer.
-bool same_tray_structure(const std::vector<TrayEntry> &before,
-                         const std::vector<TrayEntry> &after);
+/// Whether after lists the same entries as before, in the same order, so
+/// the menu keeps its entries and only updates their texts and actions. A
+/// rebuild would close a submenu that is open under the pointer.
+bool same_tray_controllers(const std::vector<TrayEntry> &before,
+                           const std::vector<TrayEntry> &after);
 
 enum class TrayIconState { Connected, Idle, Unreachable };
 

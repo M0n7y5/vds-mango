@@ -380,9 +380,16 @@ void MainWindow::update_tray_menu() {
   std::vector<TrayEntry> entries =
       tray_entries(service_state(), controllers_,
                    [this](const QString &address) { return name_of(address); });
-  if (same_tray_structure(tray_entries_, entries)) {
+  if (same_tray_controllers(tray_entries_, entries)) {
     for (std::size_t index = 0; index < entries.size(); ++index) {
-      tray_entry_actions_[index]->setText(entries[index].text);
+      QAction *action = tray_entry_actions_[index];
+      action->setText(entries[index].text);
+      QMenu *submenu = action->menu<QMenu *>();
+      if (submenu != nullptr &&
+          entries[index].actions != tray_entries_[index].actions) {
+        submenu->clear();
+        fill_tray_submenu(submenu, entries[index]);
+      }
     }
     tray_entries_ = std::move(entries);
     return;
@@ -406,24 +413,28 @@ void MainWindow::update_tray_menu() {
       continue;
     }
     auto *submenu = new QMenu(entry.text, tray_menu_);
-    const QString address = entry.address;
-    for (const TrayAction action : entry.actions) {
-      switch (action) {
-      case TrayAction::Test:
-        submenu->addAction("Test", this,
-                           [this, address] { test_controller(address); });
-        break;
-      case TrayAction::Edit:
-        submenu->addAction("Edit…", this, [this, address] {
-          open_from_tray([this, address] { edit_controller(address); });
-        });
-        break;
-      }
-    }
+    fill_tray_submenu(submenu, entry);
     tray_entry_actions_.push_back(
         tray_menu_->insertMenu(tray_entries_end_, submenu));
   }
   tray_entries_ = std::move(entries);
+}
+
+void MainWindow::fill_tray_submenu(QMenu *submenu, const TrayEntry &entry) {
+  const QString address = entry.address;
+  for (const TrayAction action : entry.actions) {
+    switch (action) {
+    case TrayAction::Test:
+      submenu->addAction("Test", this,
+                         [this, address] { test_controller(address); });
+      break;
+    case TrayAction::Edit:
+      submenu->addAction("Edit…", this, [this, address] {
+        open_from_tray([this, address] { edit_controller(address); });
+      });
+      break;
+    }
+  }
 }
 
 ServiceState MainWindow::service_state() const {

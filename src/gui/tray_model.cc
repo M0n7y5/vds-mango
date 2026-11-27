@@ -56,12 +56,11 @@ tray_entries(ServiceState service,
   return entries;
 }
 
-bool same_tray_structure(const std::vector<TrayEntry> &before,
-                         const std::vector<TrayEntry> &after) {
+bool same_tray_controllers(const std::vector<TrayEntry> &before,
+                           const std::vector<TrayEntry> &after) {
   return std::equal(before.begin(), before.end(), after.begin(), after.end(),
                     [](const TrayEntry &left, const TrayEntry &right) {
-                      return left.address == right.address &&
-                             left.actions == right.actions;
+                      return left.address == right.address;
                     });
 }
 

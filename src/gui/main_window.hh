@@ -52,6 +52,7 @@ private:
   void update_tray();
   /// The controller entries at the top of the tray menu.
   void update_tray_menu();
+  void fill_tray_submenu(QMenu *submenu, const TrayEntry &entry);
   ServiceState service_state() const;
 
   void refresh_controllers();

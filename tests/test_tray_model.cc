@@ -138,27 +138,33 @@ void test_battery_change_keeps_the_open_submenu() {
   before.battery = 55;
   ControllerStatus after = connected(kPad);
   after.battery = 45;
-  VDS_CHECK(vds::gui::same_tray_structure(
+  VDS_CHECK(vds::gui::same_tray_controllers(
       entries(ServiceState::Running, {before}),
       entries(ServiceState::Running, {after})));
 }
 
-void test_connecting_rebuilds_the_submenu_to_add_test() {
-  VDS_CHECK(!vds::gui::same_tray_structure(
-      entries(ServiceState::Running, {off(kPad)}),
-      entries(ServiceState::Running, {connected(kPad)})));
+void test_connecting_keeps_the_neighbours_open_submenu() {
+  VDS_CHECK(vds::gui::same_tray_controllers(
+      entries(ServiceState::Running, {off(kPad), off(kSteam)}),
+      entries(ServiceState::Running, {connected(kPad), off(kSteam)})));
 }
 
 void test_added_controller_rebuilds_the_menu() {
-  VDS_CHECK(!vds::gui::same_tray_structure(
+  VDS_CHECK(!vds::gui::same_tray_controllers(
       entries(ServiceState::Running, {off(kPad)}),
       entries(ServiceState::Running, {off(kPad), off(kSteam)})));
 }
 
 void test_replaced_controller_rebuilds_its_submenu_for_the_new_address() {
-  VDS_CHECK(!vds::gui::same_tray_structure(
+  VDS_CHECK(!vds::gui::same_tray_controllers(
       entries(ServiceState::Running, {off(kPad)}),
       entries(ServiceState::Running, {off(kSteam)})));
+}
+
+void test_first_controller_replaces_the_plain_status_line() {
+  VDS_CHECK(!vds::gui::same_tray_controllers(
+      entries(ServiceState::Running, {}),
+      entries(ServiceState::Running, {off(kPad)})));
 }
 
 void test_one_connected_controller_shows_the_normal_icon() {
@@ -245,9 +251,10 @@ void run_tests() {
   test_first_poll_pending_does_not_claim_no_controllers();
   test_status_lines_have_no_actions();
   test_battery_change_keeps_the_open_submenu();
-  test_connecting_rebuilds_the_submenu_to_add_test();
+  test_connecting_keeps_the_neighbours_open_submenu();
   test_added_controller_rebuilds_the_menu();
   test_replaced_controller_rebuilds_its_submenu_for_the_new_address();
+  test_first_controller_replaces_the_plain_status_line();
   test_one_connected_controller_shows_the_normal_icon();
   test_no_connected_controller_dims_the_icon();
   test_unreachable_service_warns_despite_a_stale_connected_list();
