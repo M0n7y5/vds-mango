@@ -382,8 +382,8 @@ void MainWindow::update_tray_menu() {
                    [this](const QString &address) { return name_of(address); });
   if (same_tray_controllers(tray_entries_, entries)) {
     // Plasma's dbusmenu importer skips the first LayoutUpdated for a
-    // submenu after it fetched that submenu on opening it, so a refilled
-    // submenu kept its old items and their clicks went to ids the app had
+    // submenu after it fetched that submenu on opening it. A refilled
+    // submenu keeps its old items, and their clicks go to ids the app has
     // dropped. Properties reach it reliably, so the items stay and only
     // their texts and visibility change.
     for (std::size_t index = 0; index < entries.size(); ++index) {

@@ -149,7 +149,7 @@ void test_battery_change_keeps_the_open_submenu() {
       entries(ServiceState::Running, {after})));
 }
 
-// Plasma ignored a refilled submenu and kept "Edit…" alone after a connect.
+// Plasma ignores a refilled submenu and keeps "Edit…" alone after a connect.
 void test_connecting_keeps_the_submenu_items() {
   VDS_CHECK(vds::gui::same_tray_controllers(
       entries(ServiceState::Running, {off(kPad), off(kSteam)}),
